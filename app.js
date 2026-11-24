@@ -60,6 +60,7 @@ let pendingSpot = null;
 let selectedDay = new Date().getDay();
 let spotFilters = { openOnly: true, quiet: false, outlets: false };
 const ALL_FRIENDS_OPTION = "all";
+let leaderboardRanking = "fastest";
 let leaderboardGroupId = ALL_FRIENDS_OPTION;
 
 // Older saves only had a building and a start time, so fill in the newer fields.
@@ -314,7 +315,7 @@ function saveWalk(walk) {
 // phone shares its location, it also shows how far is left and stops by itself
 // when you reach the next class's building. A web page only gets location while
 // it's open on screen, so "I've arrived" always works too. Finished walks are saved.
-function createWalkTimer({ predictedMinutes, from, to }) {
+function createWalkTimer({ predictedMinutes, routeMeters, from, to }) {
   const destination = findBuilding(to.buildingId);
   const timer = document.createElement("div");
   timer.className = "walk-timer";
@@ -365,6 +366,8 @@ function createWalkTimer({ predictedMinutes, from, to }) {
       to: classLabel(to),
       seconds: Math.round(seconds),
       meters: walkedMeters > 0 ? Math.round(walkedMeters) : null,
+      // The walking route's length, used for your speed when location was off.
+      routeMeters: Math.round(routeMeters),
       onTime,
       date: now.toISOString(),
     });
@@ -494,7 +497,7 @@ async function renderRoutes() {
     if (previousEnds > leaveBy) {
       item.innerHTML += `<span class="warning">${escapeHtml(classLabel(from))} ends at ${formatMinutes(previousEnds)}, so you'll be about ${previousEnds - leaveBy} min late.</span>`;
     }
-    item.appendChild(createWalkTimer({ predictedMinutes: walkMinutes, from, to }));
+    item.appendChild(createWalkTimer({ predictedMinutes: walkMinutes, routeMeters: leg.meters, from, to }));
     legList.appendChild(item);
   });
 
@@ -1237,14 +1240,25 @@ function renderLeaderboard() {
   }
   select.value = leaderboardGroupId;
 
-  // Your row uses the walks you timed on the way to class once you have any;
-  // friends are sample data.
-  const timed = walkStats(walks);
-  const yourStats = timed.walks > 0 ? timed : SAMPLE_WALK_STATS.you;
-  document.getElementById("leaderboard-note").textContent =
-    timed.walks > 0
-      ? `Your row uses the ${timed.walks} walk${timed.walks === 1 ? "" : "s"} you timed on the way to class. Friends' stats are sample data.`
-      : "Stats are sample data for now. Time your walks to class with Start walk and your row will use them.";
+  document.querySelectorAll("#ranking-buttons .chip").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.ranking === leaderboardRanking));
+  });
+  document.getElementById("ranking-explanation").textContent = RANKINGS[leaderboardRanking].explanation;
+
+  // Your row uses the walks you timed once you have them (speed from walks with
+  // a distance, on time from walks on the way to class), and sample numbers
+  // for whichever you don't have yet. Friends are sample data.
+  const speed = walkSpeedMph(walks);
+  const onTime = walkStats(walks);
+  const yourStats = {
+    mph: speed ? speed.mph : SAMPLE_WALK_STATS.you.mph,
+    ...(onTime.walks > 0 ? onTime : { walks: SAMPLE_WALK_STATS.you.walks, onTimeWalks: SAMPLE_WALK_STATS.you.onTimeWalks }),
+  };
+  const usesRealNumbers = leaderboardRanking === "fastest" ? speed !== null : onTime.walks > 0;
+  const realCount = leaderboardRanking === "fastest" ? speed?.walks : onTime.walks;
+  document.getElementById("leaderboard-note").textContent = usesRealNumbers
+    ? `Your row uses the ${realCount} walk${realCount === 1 ? "" : "s"} you timed with Start walk. Friends' stats are sample data.`
+    : "Stats are sample data for now. Time your walks to class with Start walk and your row will use them.";
 
   const group = groups.find((other) => other.id === leaderboardGroupId);
   const friends = group ? group.memberIds.map(findFriend) : SAMPLE_FRIENDS;
@@ -1252,7 +1266,7 @@ function renderLeaderboard() {
     { id: "you", name: "You", color: "var(--accent)", stats: yourStats },
     ...friends.map((friend) => ({ id: friend.id, name: friend.name, color: friend.color, stats: SAMPLE_WALK_STATS[friend.id] })),
   ];
-  const ranked = rankPeople(people);
+  const ranked = rankPeople(people, leaderboardRanking);
   const best = ranked[0].score || 1;
 
   const list = document.getElementById("leaderboard-list");
@@ -1263,13 +1277,26 @@ function renderLeaderboard() {
     item.innerHTML =
       `<span class="place">${person.place}</span>` +
       `<span class="who"><span class="swatch" style="background:${person.color}"></span>${escapeHtml(person.name)}</span>` +
-      `<span class="value">${describeOnTime(person.stats)}</span>` +
+      `<span class="value">${RANKINGS[leaderboardRanking].describe(person.stats)}</span>` +
       `<span class="bar" style="width:${Math.round((person.score / best) * 100)}%;background:${person.color}"></span>`;
     list.appendChild(item);
   }
 }
 
 function setUpLeaderboard() {
+  const buttons = document.getElementById("ranking-buttons");
+  for (const [name, ranking] of Object.entries(RANKINGS)) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip";
+    button.dataset.ranking = name;
+    button.textContent = ranking.label;
+    button.addEventListener("click", () => {
+      leaderboardRanking = name;
+      renderLeaderboard();
+    });
+    buttons.appendChild(button);
+  }
   document.getElementById("leaderboard-group").addEventListener("change", (event) => {
     leaderboardGroupId = event.target.value;
     renderLeaderboard();

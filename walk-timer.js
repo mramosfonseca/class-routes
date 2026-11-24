@@ -85,6 +85,41 @@ function walkStats(walks) {
   return { walks: counted.length, onTimeWalks: counted.filter((walk) => walk.onTime).length };
 }
 
+// ---- Walking speed ----
+
+const METERS_PER_SECOND_TO_MPH = 2.23694;
+// Walks too short to say much about your pace are left out of your speed.
+const MIN_SPEED_WALK_SECONDS = 60;
+const MIN_SPEED_WALK_METERS = 100;
+// Faster than this you were probably on a bike or bus; slower, you probably
+// stopped somewhere on the way. Either way it isn't your walking pace.
+const MAX_WALKING_MPH = 6;
+const MIN_WALKING_MPH = 1;
+
+// How far a walk went: what the phone's location measured, or the app's walking
+// route when location was off.
+function walkDistanceMeters(walk) {
+  return walk.meters ?? walk.routeMeters ?? null;
+}
+
+// Your average walking speed in mph over the walks that look like real walks
+// (total distance over total time), or null if there are none yet.
+function walkSpeedMph(walks) {
+  let meters = 0;
+  let seconds = 0;
+  let counted = 0;
+  for (const walk of walks) {
+    const distance = walkDistanceMeters(walk);
+    if (distance === null || distance < MIN_SPEED_WALK_METERS || walk.seconds < MIN_SPEED_WALK_SECONDS) continue;
+    const mph = (distance / walk.seconds) * METERS_PER_SECOND_TO_MPH;
+    if (mph > MAX_WALKING_MPH || mph < MIN_WALKING_MPH) continue;
+    meters += distance;
+    seconds += walk.seconds;
+    counted += 1;
+  }
+  return counted === 0 ? null : { mph: (meters / seconds) * METERS_PER_SECOND_TO_MPH, walks: counted };
+}
+
 function compareWalk(predictedMinutes, actualSeconds) {
   const actualMinutes = Math.round(actualSeconds / 60);
   const difference = actualMinutes - predictedMinutes;
