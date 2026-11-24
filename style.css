@@ -785,6 +785,53 @@ button.danger {
   );
 }
 
+/* A schedule someone shared, on the Week calendar for a while */
+
+.shared-schedule-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 8px;
+  background: var(--today);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.shared-event {
+  position: absolute;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 2px 4px;
+  border: 2px dashed #7c3aed;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 0.75rem;
+  line-height: 1.25;
+}
+
+.shared-event strong {
+  color: #7c3aed;
+}
+
+:root[data-theme="dark"] .shared-event strong {
+  color: #c4b5fd;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .shared-event strong {
+    color: #c4b5fd;
+  }
+}
+
+.shared-event span {
+  color: var(--muted);
+}
+
 /* Share links */
 
 .share-row {

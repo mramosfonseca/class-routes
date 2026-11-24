@@ -510,7 +510,32 @@ async function renderRoutes() {
   map.fitBounds(L.featureGroup(visibleLayers).getBounds(), { padding: [30, 30] });
 }
 
-// The Week view shows only your own classes and blocks.
+// The shared schedule's classes and blocks for one day, as dashed outlines in
+// the right half of the day column. They aren't buttons: there's nothing to edit.
+function sharedScheduleDayHtml(shared, day, placement) {
+  const items = [
+    ...shared.classes
+      .filter((entry) => entry.days.includes(day))
+      .map((entry) => ({ entry, label: entry.course || findBuilding(entry.buildingId).name, place: findBuilding(entry.buildingId).name })),
+    ...shared.blocks.filter((block) => block.days.includes(day)).map((block) => ({ entry: block, label: block.name, place: "" })),
+  ];
+  const { lanes, laneCount } = assignLanes(items.map(({ entry }) => placement(entry)));
+  const laneWidth = 50 / laneCount;
+  return items
+    .map(({ entry, label, place }, index) => {
+      const { start, end, top, height } = placement(entry);
+      const when = `${formatMinutes(start)}–${formatMinutes(end)}`;
+      return (
+        `<div class="shared-event" title="${escapeHtml(shared.name)}: ${escapeHtml(label)}, ${when}${place ? `, ${escapeHtml(place)}` : ""}" ` +
+        `style="top:${top}px;height:${height}px;left:calc(${50 + lanes[index] * laneWidth}% + 2px);width:calc(${laneWidth}% - 4px)">` +
+        `<strong>${escapeHtml(label)}</strong><span>${when}</span></div>`
+      );
+    })
+    .join("");
+}
+
+// The Week view shows your own classes and blocks, plus a schedule someone
+// shared with you while it's showing.
 function renderWeek() {
   const week = document.getElementById("week");
   const today = new Date().getDay();
@@ -536,6 +561,16 @@ function renderWeek() {
     const height = Math.max(18, ((end - start) / 60) * HOUR_HEIGHT_PX);
     return { start, end, top, height };
   };
+  // A phone that slept can fire the 30-minute timer late, so an expired shared
+  // schedule is also cleared whenever the calendar is drawn.
+  if (sharedSchedule && Date.now() >= sharedSchedule.expiresAt) {
+    sharedSchedule = null;
+    renderSharedScheduleBar();
+  }
+  // While someone's shared schedule is showing, yours takes the left half of each
+  // day and theirs the right half.
+  const shared = sharedSchedule;
+  const yourWidth = shared ? 50 : 100;
   for (const day of days) {
     html += `<div class="week-day${day === today ? " today" : ""}">`;
     // Classes and blocks share lanes, so anything that overlaps sits side by side.
@@ -544,7 +579,7 @@ function renderWeek() {
       ...blocksOn(blocks, day).map((entry) => ({ entry, isBlock: true })),
     ];
     const { lanes, laneCount } = assignLanes(items.map(({ entry }) => placement(entry)));
-    const laneWidth = 100 / laneCount;
+    const laneWidth = yourWidth / laneCount;
     items.forEach(({ entry, isBlock }, index) => {
       const { start, end, top, height } = placement(entry);
       const position =
@@ -561,6 +596,7 @@ function renderWeek() {
           `<strong>${escapeHtml(classLabel(entry))}</strong>${times}` +
           `<span>${escapeHtml(classPlace(entry))}</span></button>`;
     });
+    if (shared) html += sharedScheduleDayHtml(shared, day, placement);
     html += "</div>";
   }
   html += "</div>";
@@ -1374,7 +1410,7 @@ function setUpSpotControls() {
 const VIEWS = {
   map: { tab: "map-tab", parts: ["spot-bar", "map"] },
   list: { tab: "list-tab", parts: ["spot-bar", "map"] },
-  week: { tab: "week-tab", parts: ["block-form-details", "week"] },
+  week: { tab: "week-tab", parts: ["block-form-details", "schedule-share-details", "shared-schedule-area", "week"] },
   groups: { tab: "groups-tab", parts: ["groups-view"] },
   leaderboard: { tab: "leaderboard-tab", parts: ["leaderboard-view"] },
 };
@@ -1563,20 +1599,14 @@ function showShareMessage(text, isError = false) {
   message.className = isError ? "form-error" : "status";
 }
 
-// Makes a link with your added spots and edits. Phones get their share menu
-// (Messages, group chats…); elsewhere the link is copied.
-async function shareMySpots() {
-  const mine = { addedSpots, editedHours, editedFullness };
-  if (!hasSomethingToShare(mine)) {
-    showShareMessage("Nothing to share yet: add a spot, or edit a spot's hours or how full it is.", true);
-    return;
-  }
-  const link = `${location.origin}${location.pathname}${encodeShare(mine)}`;
-  const what = describeShare(mine);
+// Sends a link: phones get their share menu (Messages, group chats…); elsewhere
+// the link is copied. showMessage(text, isError) reports what happened.
+async function sendLink({ hash, title, what, showMessage }) {
+  const link = `${location.origin}${location.pathname}${hash}`;
   if (navigator.share) {
     try {
-      await navigator.share({ title: "Class Routes study spots", text: `My study spots: ${what}`, url: link });
-      showShareMessage(`Shared ${what}.`);
+      await navigator.share({ title, text: `${title}: ${what}`, url: link });
+      showMessage(`Shared ${what}.`);
       return;
     } catch (error) {
       if (error.name === "AbortError") return; // closed the share menu
@@ -1584,15 +1614,126 @@ async function shareMySpots() {
   }
   try {
     await navigator.clipboard.writeText(link);
-    showShareMessage(`Link copied with ${what}. Paste it to a friend.`);
+    showMessage(`Link copied with ${what}. Paste it to a friend.`);
   } catch {
-    showShareMessage(`Copy didn't work here. The link is: ${link}`, true);
+    showMessage(`Copy didn't work here. The link is: ${link}`, true);
   }
+}
+
+// Makes a link with your added spots and edits.
+async function shareMySpots() {
+  const mine = { addedSpots, editedHours, editedFullness };
+  if (!hasSomethingToShare(mine)) {
+    showShareMessage("Nothing to share yet: add a spot, or edit a spot's hours or how full it is.", true);
+    return;
+  }
+  await sendLink({ hash: encodeShare(mine), title: "My Class Routes study spots", what: describeShare(mine), showMessage: showShareMessage });
+}
+
+// ---- Shared schedules: shown on the Week calendar for a while, never saved ----
+
+const SHARED_SCHEDULE_MINUTES = 30;
+// The schedule someone shared with you, while it's showing: { name, classes,
+// blocks, expiresAt }. Only kept in memory, so a refresh removes it.
+let sharedSchedule = null;
+let sharedScheduleTimer = null;
+
+function showScheduleShareMessage(text, isError = false) {
+  const message = document.getElementById("schedule-share-message");
+  message.textContent = text;
+  message.className = isError ? "form-error" : "status";
+}
+
+async function shareMySchedule(name) {
+  const mine = { name, classes, blocks };
+  if (classes.length === 0 && blocks.length === 0) {
+    showScheduleShareMessage("Nothing to share yet: add a class or a block first.", true);
+    return;
+  }
+  await sendLink({
+    hash: encodeSchedule(mine),
+    title: `${name.trim() || "My"}'s class schedule`,
+    what: describeSchedule(mine),
+    showMessage: showScheduleShareMessage,
+  });
+}
+
+function renderSharedScheduleBar() {
+  const bar = document.getElementById("shared-schedule-bar");
+  bar.hidden = !sharedSchedule;
+  if (!sharedSchedule) return;
+  const until = new Date(sharedSchedule.expiresAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  document.getElementById("shared-schedule-text").textContent =
+    `Showing ${sharedSchedule.name}'s schedule (dashed outlines) · disappears at ${until} or when you refresh`;
+}
+
+function hideSharedSchedule() {
+  clearTimeout(sharedScheduleTimer);
+  sharedSchedule = null;
+  renderSharedScheduleBar();
+  renderWeek();
+}
+
+// Shows someone's schedule on your Week calendar for SHARED_SCHEDULE_MINUTES.
+function showSharedSchedule(schedule) {
+  clearTimeout(sharedScheduleTimer);
+  const minutes = SHARED_SCHEDULE_MINUTES * 60 * 1000;
+  sharedSchedule = { ...schedule, expiresAt: Date.now() + minutes };
+  sharedScheduleTimer = setTimeout(hideSharedSchedule, minutes);
+  renderSharedScheduleBar();
+  renderWeek();
+  showView("week");
 }
 
 // Takes the "#share=…" off the address so a reload doesn't ask again.
 function clearShareFromAddress() {
   history.replaceState(null, "", `${location.pathname}${location.search}`);
+}
+
+// Shows the banner for a share link: its text, and what its main button does.
+function showLinkBanner(text, mainLabel, onMain) {
+  const banner = document.getElementById("import-banner");
+  document.getElementById("import-text").textContent = text;
+  const mainButton = document.getElementById("import-share");
+  mainButton.textContent = mainLabel;
+  mainButton.onclick = () => {
+    banner.hidden = true;
+    clearShareFromAddress();
+    onMain();
+  };
+  document.getElementById("dismiss-share").onclick = () => {
+    banner.hidden = true;
+    clearShareFromAddress();
+  };
+  banner.hidden = false;
+}
+
+// If the page was opened from a schedule link, offers to show it.
+function offerSharedSchedule() {
+  const schedule = decodeSchedule(location.hash, (id) => Boolean(findBuilding(id)));
+  if (!schedule || schedule.expired) {
+    clearShareFromAddress();
+    showView("week");
+    showScheduleShareMessage(
+      schedule?.expired
+        ? `That schedule link is more than ${SCHEDULE_LINK_DAYS} days old, so it no longer works. Ask for a new one.`
+        : "That schedule link didn't have a schedule we could read.",
+      true,
+    );
+    document.getElementById("schedule-share-details").open = true;
+    return;
+  }
+  showLinkBanner(
+    `${schedule.name} shared their schedule with you (${describeSchedule(schedule)}). It shows on your calendar for ${SHARED_SCHEDULE_MINUTES} minutes and isn't saved.`,
+    "Show on my calendar",
+    () => showSharedSchedule(schedule),
+  );
+}
+
+// Handles a share link in the address: a schedule or study spots.
+function handleShareLink() {
+  if (location.hash.startsWith(`#${SCHEDULE_LINK_PREFIX}`)) offerSharedSchedule();
+  else offerSharedSpots();
 }
 
 // If the page was opened from a share link, offers to import it.
@@ -1604,12 +1745,10 @@ function offerSharedSpots() {
     return;
   }
   if (!shared) return;
-  const banner = document.getElementById("import-banner");
-  document.getElementById("import-text").textContent =
-    `Someone shared ${describeShare(shared)} with you. Import adds them to your map; shared hours and "how full" replace yours for those spots.`;
-  banner.hidden = false;
-  document.getElementById("import-share").onclick = () => {
-    const { merged, summary } = mergeShared({ addedSpots, editedHours, editedFullness }, shared);
+  const newSpotCount = newSharedSpots(addedSpots, shared.addedSpots, metersBetween).length;
+  const text = `Someone shared ${describeShare(shared, newSpotCount)} with you. Import adds the spots that aren't on your map yet; shared hours and "how full" replace yours for those spots.`;
+  showLinkBanner(text, "Import", () => {
+    const { merged, summary } = mergeShared({ addedSpots, editedHours, editedFullness }, shared, metersBetween);
     ({ addedSpots, editedHours, editedFullness } = merged);
     saveAddedSpots();
     saveSpotHours();
@@ -1618,18 +1757,18 @@ function offerSharedSpots() {
     applySpotFullness(editedFullness);
     renderSpots();
     renderMeetups();
-    banner.hidden = true;
-    clearShareFromAddress();
     const parts = [];
     if (summary.added) parts.push(`added ${summary.added} spot${summary.added === 1 ? "" : "s"}`);
-    if (summary.updated) parts.push(`updated ${summary.updated}`);
+    if (summary.alreadyOnMap) {
+      parts.push(`skipped ${summary.alreadyOnMap} already on your map`);
+    }
     if (summary.edited) parts.push(`took the edits for ${summary.edited} spot${summary.edited === 1 ? "" : "s"}`);
-    showShareMessage(`Imported: ${parts.join(", ")}.`);
-  };
-  document.getElementById("dismiss-share").onclick = () => {
-    banner.hidden = true;
-    clearShareFromAddress();
-  };
+    showShareMessage(
+      summary.added === 0 && summary.edited === 0
+        ? "Nothing new to import: every shared spot is already on your map."
+        : `Imported: ${parts.join(", ")}.`,
+    );
+  });
 }
 
 // Each side panel section folds open and closed from its title. The folded ones
@@ -1689,6 +1828,11 @@ setUpThemeToggle();
 setUpPanelSections();
 setUpBlockForm();
 document.getElementById("share-spots").addEventListener("click", shareMySpots);
+document.getElementById("schedule-share-form").addEventListener("submit", (event) => {
+  event.preventDefault();
+  shareMySchedule(document.getElementById("schedule-share-name").value);
+});
+document.getElementById("hide-shared-schedule").addEventListener("click", hideSharedSchedule);
 // Turning a phone sideways (or resizing a window) can switch between the phone
 // and wide layouts, which changes how many days the Week view shows. The List
 // tab doesn't exist on wide screens (the panel is always beside the map), so
@@ -1703,7 +1847,7 @@ showView("map");
 // Without this, part of the map stays blank.
 new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById("map"));
 render();
-offerSharedSpots();
+handleShareLink();
 // Opening a share link in a tab that already has the app open only changes the
 // "#…" part of the address, which doesn't reload the page.
-window.addEventListener("hashchange", offerSharedSpots);
+window.addEventListener("hashchange", handleShareLink);

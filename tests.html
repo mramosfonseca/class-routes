@@ -13,16 +13,16 @@
     <h1>Class Routes tests</h1>
     <p id="summary">Running…</p>
     <ul id="results"></ul>
-    <script src="walk-timer.js?v=790b711"></script>
-    <script src="study-spots.js?v=790b711"></script>
-    <script src="added-spots.js?v=790b711"></script>
-    <script src="buildings.js?v=790b711"></script>
-    <script src="friends.js?v=790b711"></script>
-    <script src="leaderboard.js?v=790b711"></script>
-    <script src="custom-blocks.js?v=790b711"></script>
-    <script src="dining-halls.js?v=790b711"></script>
-    <script src="week-view.js?v=790b711"></script>
-    <script src="share-links.js?v=790b711"></script>
+    <script src="walk-timer.js?v=a01673f"></script>
+    <script src="study-spots.js?v=a01673f"></script>
+    <script src="added-spots.js?v=a01673f"></script>
+    <script src="buildings.js?v=a01673f"></script>
+    <script src="friends.js?v=a01673f"></script>
+    <script src="leaderboard.js?v=a01673f"></script>
+    <script src="custom-blocks.js?v=a01673f"></script>
+    <script src="dining-halls.js?v=a01673f"></script>
+    <script src="week-view.js?v=a01673f"></script>
+    <script src="share-links.js?v=a01673f"></script>
     <script>
       const tests = [];
       function test(name, body) {
@@ -504,19 +504,74 @@
         assertEqual(decodeShare(tampered), null);
       });
 
-      test("importing adds new spots, updates ones you already have, and takes the shared edits", () => {
+      test("importing only adds spots that aren't on your map yet, leaves yours alone, and takes the shared edits", () => {
         const mine = {
           addedSpots: [{ ...sharedSpot, percentFull: 90 }, { ...sharedSpot, id: "added-mine", name: "My spot" }],
           editedHours: { grainger: { open: 8, close: 20 }, cif: { open: 7, close: 23 } },
           editedFullness: {},
         };
         const newSpot = { ...sharedSpot, id: "added-new", name: "New spot" };
-        const { merged, summary } = mergeShared(mine, { ...sampleShare, addedSpots: [sharedSpot, newSpot] });
-        assertEqual(JSON.stringify(summary), '{"added":1,"updated":1,"edited":2}');
-        assertEqual(merged.addedSpots.map((spot) => `${spot.id}:${spot.percentFull}`).join(","), "added-1:40,added-mine:40,added-new:40");
+        const { merged, summary } = mergeShared(mine, { ...sampleShare, addedSpots: [sharedSpot, newSpot] }, metersBetween);
+        assertEqual(JSON.stringify(summary), '{"added":1,"alreadyOnMap":1,"edited":2}');
+        // Your copy of the spot you already had keeps your 90%, not the link's 40%.
+        assertEqual(merged.addedSpots.map((spot) => `${spot.id}:${spot.percentFull}`).join(","), "added-1:90,added-mine:40,added-new:40");
         assertEqual(merged.editedHours.grainger.open, 9); // the shared hours replace yours for that spot
         assertEqual(merged.editedHours.cif.open, 7); // your other edits stay
         assertEqual(merged.editedFullness.union, 70);
+      });
+
+      test("a spot someone else added at the same place with the same name counts as already on your map", () => {
+        const mine = [{ id: "added-mine", name: "DCL Lobby", percentFull: 30, lat: 40.1131, lng: -88.2264 }];
+        const sameNearby = { id: "added-theirs", name: "  dcl  lobby ", percentFull: 80, lat: 40.1135, lng: -88.2266 }; // ~50 m away
+        const sameNameFar = { ...sameNearby, id: "added-far", lat: 40.1, lng: -88.24 }; // a different place
+        const otherName = { ...sameNearby, id: "added-other", name: "DCL basement" };
+        assertEqual(newSharedSpots(mine, [sameNearby, sameNameFar, otherName], metersBetween).map((spot) => spot.id).join(","), "added-far,added-other");
+      });
+
+      test("the import banner says how many shared spots are new to you", () => {
+        const shared = { addedSpots: [sharedSpot, { ...sharedSpot, id: "added-2" }, { ...sharedSpot, id: "added-3" }], editedHours: {}, editedFullness: {} };
+        assertEqual(describeShare(shared, 1), "3 study spots (1 new to you)");
+        assertEqual(describeShare(shared, 0), "3 study spots (all already on your map)");
+        assertEqual(describeShare(shared, 3), "3 study spots");
+      });
+
+      const knownBuilding = (id) => BUILDINGS.some((building) => building.id === id);
+      const mySchedule = {
+        name: "Miguel",
+        classes: [{ course: "CS 124", buildingId: "foellinger", room: "", days: [1, 3, 5], time: "10:00", lengthMinutes: 50 }],
+        blocks: [{ id: "block-1", name: "Gym", days: [2, 4], time: "17:00", lengthMinutes: 60, color: DEFAULT_BLOCK_COLOR }],
+      };
+
+      test("a schedule link carries the classes and blocks, with only what the calendar needs", () => {
+        const now = Date.UTC(2026, 10, 23, 20, 0);
+        const hash = encodeSchedule(mySchedule, now);
+        assertEqual(/^#schedule=[A-Za-z0-9_-]+$/.test(hash), true);
+        const back = decodeSchedule(hash, knownBuilding, now);
+        assertEqual(back.name, "Miguel");
+        assertEqual(`${back.classes[0].course} ${back.classes[0].time} ${back.classes[0].days}`, "CS 124 10:00 1,3,5");
+        assertEqual(JSON.stringify(back.blocks[0]), '{"name":"Gym","days":[2,4],"time":"17:00","lengthMinutes":60}');
+        assertEqual(describeSchedule(back), "1 class and 1 block");
+        // A spot link and a schedule link don't get mixed up.
+        assertEqual(decodeShare(hash), null);
+      });
+
+      test("schedule links stop working after a week, and broken or tampered ones are ignored", () => {
+        const sent = Date.UTC(2026, 10, 23);
+        const hash = encodeSchedule(mySchedule, sent);
+        assertEqual(decodeSchedule(hash, knownBuilding, sent + 6 * DAY_MS).name, "Miguel");
+        assertEqual(decodeSchedule(hash, knownBuilding, sent + 8 * DAY_MS).expired, true);
+        assertEqual(decodeSchedule("#schedule=broken!!", knownBuilding, sent), null);
+        const tampered = encodeSchedule(
+          {
+            name: "",
+            classes: [{ course: "X", buildingId: "not-a-building", room: "", days: [1], time: "10:00", lengthMinutes: 50 }],
+            blocks: [{ name: "Late", days: [9], time: "25:00", lengthMinutes: 60 }],
+          },
+          sent,
+        );
+        assertEqual(decodeSchedule(tampered, knownBuilding, sent), null);
+        const noName = encodeSchedule({ ...mySchedule, name: "   " }, sent);
+        assertEqual(decodeSchedule(noName, knownBuilding, sent).name, "A friend");
       });
 
       const results = document.getElementById("results");
