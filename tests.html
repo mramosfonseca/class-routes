@@ -13,15 +13,15 @@
     <h1>Class Routes tests</h1>
     <p id="summary">Running…</p>
     <ul id="results"></ul>
-    <script src="walk-timer.js?v=2622f8f"></script>
-    <script src="study-spots.js?v=2622f8f"></script>
-    <script src="added-spots.js?v=2622f8f"></script>
-    <script src="buildings.js?v=2622f8f"></script>
-    <script src="friends.js?v=2622f8f"></script>
-    <script src="leaderboard.js?v=2622f8f"></script>
-    <script src="custom-blocks.js?v=2622f8f"></script>
-    <script src="dining-halls.js?v=2622f8f"></script>
-    <script src="week-view.js?v=2622f8f"></script>
+    <script src="walk-timer.js?v=6b73f8b"></script>
+    <script src="study-spots.js?v=6b73f8b"></script>
+    <script src="added-spots.js?v=6b73f8b"></script>
+    <script src="buildings.js?v=6b73f8b"></script>
+    <script src="friends.js?v=6b73f8b"></script>
+    <script src="leaderboard.js?v=6b73f8b"></script>
+    <script src="custom-blocks.js?v=6b73f8b"></script>
+    <script src="dining-halls.js?v=6b73f8b"></script>
+    <script src="week-view.js?v=6b73f8b"></script>
     <script>
       const tests = [];
       function test(name, body) {
@@ -52,6 +52,61 @@
       test("the live timer shows minutes and seconds", () => {
         assertEqual(formatElapsed(125), "2:05");
         assertEqual(formatElapsed(0), "0:00");
+      });
+
+      test("arriving takes two close location readings in a row, so one jumpy reading can't stop the timer", () => {
+        let state = { closeReadings: 0, arrived: false };
+        state = arrivalStep(state, 30);
+        assertEqual(state.arrived, false);
+        state = arrivalStep(state, 200); // a jumpy reading far away resets the count
+        state = arrivalStep(state, 40);
+        assertEqual(state.arrived, false);
+        state = arrivalStep(state, 20);
+        assertEqual(state.arrived, true);
+        assertEqual(arrivalStep({ closeReadings: 0 }, ARRIVAL_RADIUS_METERS + 1).closeReadings, 0);
+      });
+
+      test("distance walked adds up real steps and ignores small jittery moves", () => {
+        const along = (a, b) => Math.abs(b - a); // positions on a straight line, in meters
+        let walk = addWalkStep(0, null, 0, along);
+        walk = addWalkStep(walk.meters, walk.lastPoint, 4, along); // jitter, ignored
+        assertEqual(walk.meters, 0);
+        walk = addWalkStep(walk.meters, walk.lastPoint, 30, along);
+        walk = addWalkStep(walk.meters, walk.lastPoint, 75, along);
+        assertEqual(walk.meters, 75);
+      });
+
+      test("a walk is on time if you arrive by the time class starts", () => {
+        assertEqual(isOnTime(10 * 60 + 58, 11 * 60), true);
+        assertEqual(isOnTime(11 * 60, 11 * 60), true);
+        assertEqual(isOnTime(11 * 60 + 1, 11 * 60), false);
+      });
+
+      test("a walk only counts for on time on the class's day, near its start", () => {
+        const mwf = [1, 3, 5];
+        const eleven = 11 * 60;
+        assertEqual(walkOnTimeResult(10 * 60 + 55, MONDAY, mwf, eleven), true);
+        assertEqual(walkOnTimeResult(11 * 60 + 4, MONDAY, mwf, eleven), false);
+        // Timing a walk in the evening, or on a day without that class, says nothing about getting to class.
+        assertEqual(walkOnTimeResult(20 * 60 + 29, MONDAY, mwf, eleven), null);
+        assertEqual(walkOnTimeResult(10 * 60 + 55, 2, mwf, eleven), null);
+        assertEqual(walkOnTimeResult(eleven - ON_TIME_WINDOW_BEFORE_MINUTES, MONDAY, mwf, eleven), true);
+        assertEqual(walkOnTimeResult(eleven + ON_TIME_WINDOW_AFTER_MINUTES + 1, MONDAY, mwf, eleven), null);
+      });
+
+      test("saved walks give your leaderboard numbers, only counting walks on the way to class", () => {
+        const walks = [
+          { from: "CS 124", to: "MATH 241", seconds: 360, onTime: true },
+          { from: "CS 124", to: "MATH 241", seconds: 600, onTime: false },
+          { from: "CS 124", to: "MATH 241", seconds: 420, onTime: null },
+          { from: "CS 128", to: "ECE 110", seconds: 0, onTime: true },
+          { from: "CS 128", seconds: 300, onTime: true },
+          null,
+        ];
+        const loaded = parseWalks(JSON.stringify(walks));
+        assertEqual(loaded.length, 3);
+        assertEqual(JSON.stringify(walkStats(loaded)), '{"walks":2,"onTimeWalks":1}');
+        assertEqual(parseWalks("not json").length, 0);
       });
 
       const grainger = STUDY_SPOTS.find((spot) => spot.id === "grainger");

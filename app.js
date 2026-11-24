@@ -4,6 +4,7 @@ const ADDED_SPOTS_STORAGE_KEY = "class-routes.added-spots";
 const SPOT_HOURS_STORAGE_KEY = "class-routes.spot-hours";
 const SPOT_FULLNESS_STORAGE_KEY = "class-routes.spot-fullness";
 const FOLDED_SECTIONS_STORAGE_KEY = "class-routes.folded-sections";
+const WALKS_STORAGE_KEY = "class-routes.walks";
 const BLOCKS_STORAGE_KEY = "class-routes.blocks";
 const WALKING_SPEED_METERS_PER_SECOND = 1.35;
 const MINUTES_FROM_ENTRANCE_TO_ROOM = 2;
@@ -51,6 +52,8 @@ let editedFullness = loadSaved(SPOT_FULLNESS_STORAGE_KEY, parseSpotFullness);
 applySpotFullness(editedFullness);
 // Custom blocks on the Week calendar, and the one being edited in the form (if any).
 let blocks = loadSaved(BLOCKS_STORAGE_KEY, parseBlocks);
+// Walks you timed with Start walk, oldest first.
+let walks = loadSaved(WALKS_STORAGE_KEY, parseWalks);
 let editingBlockId = null;
 // The name and color of a spot waiting for a map click to place it.
 let pendingSpot = null;
@@ -300,8 +303,19 @@ function renderDayTabs() {
   document.getElementById("selected-day-name").textContent = DAY_LONG[selectedDay];
 }
 
-// A "Start walk" button that times the walk and compares it with the prediction.
-function createWalkTimer(predictedMinutes) {
+// Saves a finished walk on this device; the Leaderboard uses saved walks for your row.
+function saveWalk(walk) {
+  walks = [...walks, walk];
+  saveToStorage(WALKS_STORAGE_KEY, walks);
+  renderLeaderboard();
+}
+
+// A "Start walk" button that times the walk from one class to the next. If the
+// phone shares its location, it also shows how far is left and stops by itself
+// when you reach the next class's building. A web page only gets location while
+// it's open on screen, so "I've arrived" always works too. Finished walks are saved.
+function createWalkTimer({ predictedMinutes, from, to }) {
+  const destination = findBuilding(to.buildingId);
   const timer = document.createElement("div");
   timer.className = "walk-timer";
   const button = document.createElement("button");
@@ -312,29 +326,108 @@ function createWalkTimer(predictedMinutes) {
 
   let startedAt = null;
   let tick = null;
+  let watchId = null;
+  let arrival = null;
+  let walkedMeters = 0;
+  let lastPoint = null;
+  let metersLeft = null;
+  let locationNote = "";
 
   function showIdle() {
     button.textContent = startedAt === null ? "Start walk" : "Walk again";
+  }
+
+  function showProgress() {
+    const left = metersLeft === null ? "" : ` · ${Math.round(metersLeft)} m to go`;
+    readout.textContent = `Walking… ${formatElapsed((Date.now() - startedAt) / 1000)}${left}${locationNote}`;
+  }
+
+  function stopWatchingLocation() {
+    if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+
+  // Ends the walk, saves it, and says how it went. arrivedBy is "location" or "button".
+  function finish(arrivedBy) {
+    clearInterval(tick);
+    tick = null;
+    stopWatchingLocation();
+    const seconds = (Date.now() - startedAt) / 1000;
+    showIdle();
+    if (seconds < MIN_SAVED_WALK_SECONDS) {
+      readout.textContent = `That was under ${MIN_SAVED_WALK_SECONDS} seconds, so it wasn't saved.`;
+      return;
+    }
+    const now = new Date();
+    const onTime = walkOnTimeResult(now.getHours() * 60 + now.getMinutes(), now.getDay(), to.days, toMinutes(to.time));
+    saveWalk({
+      from: classLabel(from),
+      to: classLabel(to),
+      seconds: Math.round(seconds),
+      meters: walkedMeters > 0 ? Math.round(walkedMeters) : null,
+      onTime,
+      date: now.toISOString(),
+    });
+    const verdict =
+      onTime === null
+        ? `Saved, but not counted for on time since it wasn't near ${classLabel(to)}'s start.`
+        : `${onTime ? "On time" : "Late"} for ${classLabel(to)}. Saved.`;
+    readout.textContent =
+      `${arrivedBy === "location" ? "You've arrived. " : ""}${compareWalk(predictedMinutes, seconds)} ${verdict}`;
+  }
+
+  // Follows the phone's location: adds up distance walked, shows how far is
+  // left, and finishes the walk once you're at the next class's building.
+  function startWatchingLocation() {
+    if (!("geolocation" in navigator)) {
+      locationNote = " · Location isn't available here; tap I've arrived when you get there.";
+      return;
+    }
+    arrival = { closeReadings: 0, arrived: false };
+    walkedMeters = 0;
+    lastPoint = null;
+    metersLeft = null;
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        if (tick === null) return; // a reading that arrives after the walk ended
+        const point = { lat: position.coords.latitude, lng: position.coords.longitude };
+        ({ meters: walkedMeters, lastPoint } = addWalkStep(walkedMeters, lastPoint, point, metersBetween));
+        metersLeft = metersBetween(point, destination);
+        arrival = arrivalStep(arrival, metersLeft);
+        locationNote = "";
+        if (arrival.arrived) finish("location");
+        else showProgress();
+      },
+      (error) => {
+        locationNote =
+          error.code === error.PERMISSION_DENIED
+            ? " · Location is off, so tap I've arrived when you get there."
+            : " · Still finding your location…";
+        showProgress();
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 },
+    );
   }
 
   button.addEventListener("click", () => {
     if (tick === null) {
       // Timing from a timestamp keeps it right even if the phone sleeps mid-walk.
       startedAt = Date.now();
-      readout.textContent = "Walking… 0:00";
+      locationNote = "";
       button.textContent = "I've arrived";
+      startWatchingLocation();
+      showProgress();
       tick = setInterval(() => {
+        // The walk list is redrawn when the day or classes change; stop if this timer is gone.
         if (!timer.isConnected) {
           clearInterval(tick);
+          stopWatchingLocation();
           return;
         }
-        readout.textContent = `Walking… ${formatElapsed((Date.now() - startedAt) / 1000)}`;
+        showProgress();
       }, 1000);
     } else {
-      clearInterval(tick);
-      tick = null;
-      readout.textContent = compareWalk(predictedMinutes, (Date.now() - startedAt) / 1000);
-      showIdle();
+      finish("button");
     }
   });
   showIdle();
@@ -401,7 +494,7 @@ async function renderRoutes() {
     if (previousEnds > leaveBy) {
       item.innerHTML += `<span class="warning">${escapeHtml(classLabel(from))} ends at ${formatMinutes(previousEnds)}, so you'll be about ${previousEnds - leaveBy} min late.</span>`;
     }
-    item.appendChild(createWalkTimer(walkMinutes));
+    item.appendChild(createWalkTimer({ predictedMinutes: walkMinutes, from, to }));
     legList.appendChild(item);
   });
 
@@ -1144,10 +1237,19 @@ function renderLeaderboard() {
   }
   select.value = leaderboardGroupId;
 
+  // Your row uses the walks you timed on the way to class once you have any;
+  // friends are sample data.
+  const timed = walkStats(walks);
+  const yourStats = timed.walks > 0 ? timed : SAMPLE_WALK_STATS.you;
+  document.getElementById("leaderboard-note").textContent =
+    timed.walks > 0
+      ? `Your row uses the ${timed.walks} walk${timed.walks === 1 ? "" : "s"} you timed on the way to class. Friends' stats are sample data.`
+      : "Stats are sample data for now. Time your walks to class with Start walk and your row will use them.";
+
   const group = groups.find((other) => other.id === leaderboardGroupId);
   const friends = group ? group.memberIds.map(findFriend) : SAMPLE_FRIENDS;
   const people = [
-    { id: "you", name: "You", color: "var(--accent)", stats: SAMPLE_WALK_STATS.you },
+    { id: "you", name: "You", color: "var(--accent)", stats: yourStats },
     ...friends.map((friend) => ({ id: friend.id, name: friend.name, color: friend.color, stats: SAMPLE_WALK_STATS[friend.id] })),
   ];
   const ranked = rankPeople(people);
