@@ -58,7 +58,6 @@ let selectedDay = new Date().getDay();
 let spotFilters = { openOnly: true, quiet: false, outlets: false };
 const ALL_FRIENDS_OPTION = "all";
 let leaderboardGroupId = ALL_FRIENDS_OPTION;
-let leaderboardRanking = "fastest";
 
 // Older saves only had a building and a start time, so fill in the newer fields.
 function upgradeClass(entry) {
@@ -1145,17 +1144,13 @@ function renderLeaderboard() {
   }
   select.value = leaderboardGroupId;
 
-  document.querySelectorAll("#ranking-buttons .chip").forEach((button) => {
-    button.setAttribute("aria-pressed", String(button.dataset.ranking === leaderboardRanking));
-  });
-
   const group = groups.find((other) => other.id === leaderboardGroupId);
   const friends = group ? group.memberIds.map(findFriend) : SAMPLE_FRIENDS;
   const people = [
     { id: "you", name: "You", color: "var(--accent)", stats: SAMPLE_WALK_STATS.you },
     ...friends.map((friend) => ({ id: friend.id, name: friend.name, color: friend.color, stats: SAMPLE_WALK_STATS[friend.id] })),
   ];
-  const ranked = rankPeople(people, leaderboardRanking);
+  const ranked = rankPeople(people);
   const best = ranked[0].score || 1;
 
   const list = document.getElementById("leaderboard-list");
@@ -1166,26 +1161,13 @@ function renderLeaderboard() {
     item.innerHTML =
       `<span class="place">${person.place}</span>` +
       `<span class="who"><span class="swatch" style="background:${person.color}"></span>${escapeHtml(person.name)}</span>` +
-      `<span class="value">${RANKINGS[leaderboardRanking].describe(person.stats)}</span>` +
+      `<span class="value">${describeOnTime(person.stats)}</span>` +
       `<span class="bar" style="width:${Math.round((person.score / best) * 100)}%;background:${person.color}"></span>`;
     list.appendChild(item);
   }
 }
 
 function setUpLeaderboard() {
-  const buttons = document.getElementById("ranking-buttons");
-  for (const [name, ranking] of Object.entries(RANKINGS)) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "chip";
-    button.dataset.ranking = name;
-    button.textContent = ranking.label;
-    button.addEventListener("click", () => {
-      leaderboardRanking = name;
-      renderLeaderboard();
-    });
-    buttons.appendChild(button);
-  }
   document.getElementById("leaderboard-group").addEventListener("change", (event) => {
     leaderboardGroupId = event.target.value;
     renderLeaderboard();
