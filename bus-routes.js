@@ -58,6 +58,74 @@ function parseBusRoutePicks(json, routes) {
   return saved.filter((id) => typeof id === "string" && known.has(id));
 }
 
+// ---- Scheduled times (from mtd-times.json, written by tools/build-mtd-routes.py) ----
+
+const BUS_TIMES_PER_ROUTE = 3;
+const MINUTES_PER_DAY = 24 * 60;
+
+// The timetable stores lists as gaps from the number before; this turns them
+// back into the numbers themselves.
+function undelta(gaps) {
+  let total = 0;
+  return gaps.map((gap) => (total += gap));
+}
+
+// Days from one date to another, both "YYYYMMDD" or "YYYY-MM-DD".
+function daysBetween(from, to) {
+  const utc = (date) => {
+    const digits = date.replace(/-/g, "");
+    return Date.UTC(Number(digits.slice(0, 4)), Number(digits.slice(4, 6)) - 1, Number(digits.slice(6, 8)));
+  };
+  return Math.round((utc(to) - utc(from)) / (24 * 60 * 60 * 1000));
+}
+
+// The day patterns running on a date, or null when the date is outside the
+// timetable (before validFrom or after validTo).
+function runningPatterns(timetable, date) {
+  const day = daysBetween(timetable.validFrom, date);
+  if (day < 0 || day > daysBetween(timetable.validFrom, timetable.validTo)) return null;
+  timetable.patternDays ??= timetable.patterns.map((gaps) => new Set(undelta(gaps)));
+  const running = new Set();
+  timetable.patternDays.forEach((days, index) => {
+    if (days.has(day)) running.add(index);
+  });
+  return running;
+}
+
+// The next scheduled buses at a stop from `minute` (minutes after midnight) on
+// `date` ("YYYY-MM-DD"). Returns [{ routeId, minutes: [clock minutes…] }, …],
+// soonest route first, or null when the date is outside the timetable.
+// Trips after midnight are listed by MTD under the day before (as 1500 for
+// 1:00 AM), so the previous day's late trips count too.
+function nextDepartures(timetable, stopId, date, minute, perRoute = BUS_TIMES_PER_ROUTE) {
+  const today = runningPatterns(timetable, date);
+  if (today === null) return null;
+  const yesterday = runningPatterns(timetable, previousDate(date)) ?? new Set();
+  const byRoute = new Map();
+  for (const [routeIndex, pattern, ...gaps] of timetable.stops[stopId] ?? []) {
+    const times = [];
+    for (const departure of undelta(gaps)) {
+      if (today.has(pattern) && departure >= minute) times.push(departure);
+      if (yesterday.has(pattern) && departure >= MINUTES_PER_DAY && departure - MINUTES_PER_DAY >= minute) {
+        times.push(departure - MINUTES_PER_DAY);
+      }
+    }
+    if (times.length === 0) continue;
+    const routeId = timetable.routes[routeIndex];
+    byRoute.set(routeId, [...(byRoute.get(routeId) ?? []), ...times]);
+  }
+  return [...byRoute.entries()]
+    .map(([routeId, times]) => ({ routeId, minutes: [...new Set(times)].sort((a, b) => a - b).slice(0, perRoute) }))
+    .sort((a, b) => a.minutes[0] - b.minutes[0]);
+}
+
+// The day before a "YYYY-MM-DD" date.
+function previousDate(date) {
+  const [year, month, day] = date.split("-").map(Number);
+  const before = new Date(Date.UTC(year, month - 1, day - 1));
+  return before.toISOString().slice(0, 10);
+}
+
 // "Nov 17" style dates for the feed's "valid through" note, from "20261219".
 function formatFeedDate(yyyymmdd) {
   const year = Number(yyyymmdd.slice(0, 4));

@@ -827,6 +827,27 @@ button.danger {
   margin-top: 4px;
 }
 
+.leaflet-popup-content .bus-times-note {
+  margin: 8px 0 4px;
+  color: var(--muted);
+}
+
+.bus-times-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.bus-times-list li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+
 /* A schedule someone shared, on the Week calendar for a while */
 
 .shared-schedule-bar {

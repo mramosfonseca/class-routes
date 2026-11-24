@@ -13,18 +13,18 @@
     <h1>Class Routes tests</h1>
     <p id="summary">Running…</p>
     <ul id="results"></ul>
-    <script src="walk-timer.js?v=d232219"></script>
-    <script src="study-spots.js?v=d232219"></script>
-    <script src="added-spots.js?v=d232219"></script>
-    <script src="buildings.js?v=d232219"></script>
-    <script src="friends.js?v=d232219"></script>
-    <script src="leaderboard.js?v=d232219"></script>
-    <script src="custom-blocks.js?v=d232219"></script>
-    <script src="dining-halls.js?v=d232219"></script>
-    <script src="week-view.js?v=d232219"></script>
-    <script src="share-links.js?v=d232219"></script>
-    <script src="mtd-routes.js?v=d232219"></script>
-    <script src="bus-routes.js?v=d232219"></script>
+    <script src="walk-timer.js?v=13838f8"></script>
+    <script src="study-spots.js?v=13838f8"></script>
+    <script src="added-spots.js?v=13838f8"></script>
+    <script src="buildings.js?v=13838f8"></script>
+    <script src="friends.js?v=13838f8"></script>
+    <script src="leaderboard.js?v=13838f8"></script>
+    <script src="custom-blocks.js?v=13838f8"></script>
+    <script src="dining-halls.js?v=13838f8"></script>
+    <script src="week-view.js?v=13838f8"></script>
+    <script src="share-links.js?v=13838f8"></script>
+    <script src="mtd-routes.js?v=13838f8"></script>
+    <script src="bus-routes.js?v=13838f8"></script>
     <script>
       const tests = [];
       function test(name, body) {
@@ -613,6 +613,44 @@
         assertEqual(parseBusRoutePicks('["5-green","99-gone"]', routes).join(","), "5-green");
         assertEqual(parseBusRoutePicks("[]", routes).length, 0); // you turned them all off
         assertEqual(formatFeedDate("20261219"), "Dec 19, 2026");
+      });
+
+      // A tiny timetable: day 0 is Mon Nov 30, 2026. Pattern 0 runs weekdays
+      // (days 0-4), pattern 1 runs only Saturday (day 5).
+      const tinyTimetable = {
+        validFrom: "20261130",
+        validTo: "20261206",
+        patterns: [[0, 1, 1, 1, 1], [5]],
+        routes: ["12-teal", "22-illini"],
+        stops: {
+          QUAD: [
+            [0, 0, 540, 10, 10, 10], // 12 Teal weekdays: 9:00, 9:10, 9:20, 9:30
+            [1, 0, 545, 30], // 22 Illini weekdays: 9:05, 9:35
+            [1, 0, 1500], // 22 Illini late night: 25:00, which is 1:00 AM the next day
+            [0, 1, 600], // 12 Teal Saturday: 10:00
+          ],
+        },
+      };
+
+      test("the next scheduled buses at a stop, soonest route first, three times each", () => {
+        const next = nextDepartures(tinyTimetable, "QUAD", "2026-11-30", 9 * 60 + 3);
+        assertEqual(JSON.stringify(next), '[{"routeId":"22-illini","minutes":[545,575,1500]},{"routeId":"12-teal","minutes":[550,560,570]}]');
+      });
+
+      test("after midnight, the previous day's late buses still count", () => {
+        // At 12:30 AM Tuesday, Monday's 1:00 AM trip (listed as 25:00) is next.
+        const next = nextDepartures(tinyTimetable, "QUAD", "2026-12-01", 30);
+        assertEqual(next[0].routeId, "22-illini");
+        assertEqual(next[0].minutes[0], 60);
+      });
+
+      test("weekend patterns, stops with no buses, and dates outside the timetable", () => {
+        assertEqual(JSON.stringify(nextDepartures(tinyTimetable, "QUAD", "2026-12-05", 8 * 60)), '[{"routeId":"12-teal","minutes":[600]}]');
+        assertEqual(nextDepartures(tinyTimetable, "QUAD", "2026-12-06", 8 * 60).length, 0); // Sunday: no service
+        assertEqual(nextDepartures(tinyTimetable, "NOWHERE", "2026-11-30", 8 * 60).length, 0);
+        assertEqual(nextDepartures(tinyTimetable, "QUAD", "2026-12-20", 8 * 60), null); // after the timetable ends
+        assertEqual(previousDate("2026-12-01"), "2026-11-30");
+        assertEqual(daysBetween("20261130", "2026-12-06"), 6);
       });
 
       const results = document.getElementById("results");

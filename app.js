@@ -1651,14 +1651,81 @@ function renderBusStops() {
   if (!busLayerShown() || busPicks.length === 0 || map.getZoom() < BUS_STOPS_MIN_ZOOM) return;
   const stopIds = new Set(MTD_ROUTES.filter((route) => busPicks.includes(route.id)).flatMap((route) => route.stops));
   for (const stopId of stopIds) {
-    const [name, lat, lng] = MTD_STOPS[stopId];
-    const routes = BUS_ROUTES_BY_STOP[stopId]
-      .map((route) => `<span class="bus-chip" style="background:${route.color};color:${route.textColor}">${escapeHtml(busRouteLabel(route))}</span>`)
-      .join(" ");
-    L.circleMarker([lat, lng], { renderer: busStopRenderer, radius: 5, color: "#1e293b", weight: 2, fillColor: "#ffffff", fillOpacity: 1 })
-      .bindPopup(`<strong>${escapeHtml(name)}</strong><br><small>Bus stop · routes:</small><div class="bus-chips">${routes}</div>`)
+    const [, lat, lng] = MTD_STOPS[stopId];
+    const marker = L.circleMarker([lat, lng], {
+      renderer: busStopRenderer,
+      radius: 5,
+      color: "#1e293b",
+      weight: 2,
+      fillColor: "#ffffff",
+      fillOpacity: 1,
+    })
+      .bindPopup(busStopPopup(stopId, "<p class=\"bus-times-note\">Loading scheduled buses…</p>"))
       .addTo(busStopLayer);
+    // The timetable is only downloaded when someone opens a stop.
+    marker.on("popupopen", () => showScheduledBuses(marker, stopId));
   }
+}
+
+function busChip(route, text = busRouteLabel(route)) {
+  return `<span class="bus-chip" style="background:${route.color};color:${route.textColor}">${escapeHtml(text)}</span>`;
+}
+
+function busStopPopup(stopId, timesHtml) {
+  const [name] = MTD_STOPS[stopId];
+  const routes = BUS_ROUTES_BY_STOP[stopId].map((route) => busChip(route)).join(" ");
+  return (
+    `<strong>${escapeHtml(name)}</strong><br><small>Bus stop · routes:</small><div class="bus-chips">${routes}</div>` +
+    `<div class="bus-times">${timesHtml}</div>`
+  );
+}
+
+// The timetable (mtd-times.json, about 100 KB to download), fetched once.
+let busTimetablePromise = null;
+function loadBusTimetable() {
+  busTimetablePromise ??= fetch("mtd-times.json").then((response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  });
+  // If it fails (say, the phone is offline), the next stop opened tries again.
+  busTimetablePromise.catch(() => {
+    busTimetablePromise = null;
+  });
+  return busTimetablePromise;
+}
+
+// The day and time set above the map, as a date ("YYYY-MM-DD") in this week and
+// minutes after midnight.
+function mapDateAndMinute() {
+  const [hours, minutes] = document.getElementById("spot-time").value.split(":").map(Number);
+  return { date: dateInWeekOf(new Date(), selectedDay), minute: hours * 60 + minutes };
+}
+
+// Fills a stop's popup with its next scheduled buses for the map's day and time.
+async function showScheduledBuses(marker, stopId) {
+  let timesHtml;
+  try {
+    const timetable = await loadBusTimetable();
+    const { date, minute } = mapDateAndMinute();
+    const next = nextDepartures(timetable, stopId, date, minute);
+    const when = `${DAY_SHORT[selectedDay]} ${formatMinutes(minute)}`;
+    if (next === null) {
+      timesHtml = `<p class="bus-times-note">No schedule for that day: MTD's timetable covers ${formatFeedDate(timetable.validFrom)} to ${formatFeedDate(timetable.validTo)}.</p>`;
+    } else if (next.length === 0) {
+      timesHtml = `<p class="bus-times-note">No more scheduled buses here on ${DAY_LONG[selectedDay]} after ${formatMinutes(minute)}.</p>`;
+    } else {
+      const rows = next
+        .map(({ routeId, minutes }) => {
+          const route = MTD_ROUTES.find((other) => other.id === routeId);
+          return `<li>${busChip(route, route.number)} ${minutes.map(formatMinutes).join(", ")}</li>`;
+        })
+        .join("");
+      timesHtml = `<p class="bus-times-note">Scheduled from ${when}:</p><ul class="bus-times-list">${rows}</ul>`;
+    }
+  } catch {
+    timesHtml = "<p class=\"bus-times-note\">Couldn't load the bus schedule. Check your connection and open the stop again.</p>";
+  }
+  if (marker.isPopupOpen()) marker.setPopupContent(busStopPopup(stopId, timesHtml));
 }
 
 function saveBusPicks() {
