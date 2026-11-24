@@ -785,6 +785,38 @@ button.danger {
   );
 }
 
+/* Share links */
+
+.share-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.share-row .status,
+.share-row .form-error {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.import-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 16px;
+  background: var(--today);
+  border-bottom: 1px solid var(--border);
+}
+
+.import-banner p {
+  margin: 0;
+  font-weight: 600;
+}
+
 /* Dining halls map layer */
 
 /* The marker is just the fork-and-knife shape, colored by status, with a white

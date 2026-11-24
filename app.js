@@ -1555,6 +1555,83 @@ function setUpBlockForm() {
   });
 }
 
+// ---- Share links (see share-links.js) ----
+
+function showShareMessage(text, isError = false) {
+  const message = document.getElementById("share-message");
+  message.textContent = text;
+  message.className = isError ? "form-error" : "status";
+}
+
+// Makes a link with your added spots and edits. Phones get their share menu
+// (Messages, group chats…); elsewhere the link is copied.
+async function shareMySpots() {
+  const mine = { addedSpots, editedHours, editedFullness };
+  if (!hasSomethingToShare(mine)) {
+    showShareMessage("Nothing to share yet: add a spot, or edit a spot's hours or how full it is.", true);
+    return;
+  }
+  const link = `${location.origin}${location.pathname}${encodeShare(mine)}`;
+  const what = describeShare(mine);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: "Class Routes study spots", text: `My study spots: ${what}`, url: link });
+      showShareMessage(`Shared ${what}.`);
+      return;
+    } catch (error) {
+      if (error.name === "AbortError") return; // closed the share menu
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(link);
+    showShareMessage(`Link copied with ${what}. Paste it to a friend.`);
+  } catch {
+    showShareMessage(`Copy didn't work here. The link is: ${link}`, true);
+  }
+}
+
+// Takes the "#share=…" off the address so a reload doesn't ask again.
+function clearShareFromAddress() {
+  history.replaceState(null, "", `${location.pathname}${location.search}`);
+}
+
+// If the page was opened from a share link, offers to import it.
+function offerSharedSpots() {
+  const shared = decodeShare(location.hash);
+  if (location.hash.startsWith(`#${SHARE_LINK_PREFIX}`) && !shared) {
+    clearShareFromAddress();
+    showShareMessage("That share link didn't have any spots we could read.", true);
+    return;
+  }
+  if (!shared) return;
+  const banner = document.getElementById("import-banner");
+  document.getElementById("import-text").textContent =
+    `Someone shared ${describeShare(shared)} with you. Import adds them to your map; shared hours and "how full" replace yours for those spots.`;
+  banner.hidden = false;
+  document.getElementById("import-share").onclick = () => {
+    const { merged, summary } = mergeShared({ addedSpots, editedHours, editedFullness }, shared);
+    ({ addedSpots, editedHours, editedFullness } = merged);
+    saveAddedSpots();
+    saveSpotHours();
+    saveSpotFullness();
+    applySpotHours(editedHours);
+    applySpotFullness(editedFullness);
+    renderSpots();
+    renderMeetups();
+    banner.hidden = true;
+    clearShareFromAddress();
+    const parts = [];
+    if (summary.added) parts.push(`added ${summary.added} spot${summary.added === 1 ? "" : "s"}`);
+    if (summary.updated) parts.push(`updated ${summary.updated}`);
+    if (summary.edited) parts.push(`took the edits for ${summary.edited} spot${summary.edited === 1 ? "" : "s"}`);
+    showShareMessage(`Imported: ${parts.join(", ")}.`);
+  };
+  document.getElementById("dismiss-share").onclick = () => {
+    banner.hidden = true;
+    clearShareFromAddress();
+  };
+}
+
 // Each side panel section folds open and closed from its title. The folded ones
 // are remembered so the panel looks the same after a reload.
 function setUpPanelSections() {
@@ -1611,6 +1688,7 @@ setUpLeaderboard();
 setUpThemeToggle();
 setUpPanelSections();
 setUpBlockForm();
+document.getElementById("share-spots").addEventListener("click", shareMySpots);
 // Turning a phone sideways (or resizing a window) can switch between the phone
 // and wide layouts, which changes how many days the Week view shows. The List
 // tab doesn't exist on wide screens (the panel is always beside the map), so
@@ -1625,3 +1703,7 @@ showView("map");
 // Without this, part of the map stays blank.
 new ResizeObserver(() => map.invalidateSize()).observe(document.getElementById("map"));
 render();
+offerSharedSpots();
+// Opening a share link in a tab that already has the app open only changes the
+// "#…" part of the address, which doesn't reload the page.
+window.addEventListener("hashchange", offerSharedSpots);

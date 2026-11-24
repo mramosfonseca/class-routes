@@ -13,15 +13,16 @@
     <h1>Class Routes tests</h1>
     <p id="summary">Running…</p>
     <ul id="results"></ul>
-    <script src="walk-timer.js?v=034edd3"></script>
-    <script src="study-spots.js?v=034edd3"></script>
-    <script src="added-spots.js?v=034edd3"></script>
-    <script src="buildings.js?v=034edd3"></script>
-    <script src="friends.js?v=034edd3"></script>
-    <script src="leaderboard.js?v=034edd3"></script>
-    <script src="custom-blocks.js?v=034edd3"></script>
-    <script src="dining-halls.js?v=034edd3"></script>
-    <script src="week-view.js?v=034edd3"></script>
+    <script src="walk-timer.js?v=790b711"></script>
+    <script src="study-spots.js?v=790b711"></script>
+    <script src="added-spots.js?v=790b711"></script>
+    <script src="buildings.js?v=790b711"></script>
+    <script src="friends.js?v=790b711"></script>
+    <script src="leaderboard.js?v=790b711"></script>
+    <script src="custom-blocks.js?v=790b711"></script>
+    <script src="dining-halls.js?v=790b711"></script>
+    <script src="week-view.js?v=790b711"></script>
+    <script src="share-links.js?v=790b711"></script>
     <script>
       const tests = [];
       function test(name, body) {
@@ -470,6 +471,52 @@
         // Near the end of the week it shifts back so three days still show.
         assertEqual(weekDaysToShow(order, 6, true).join(","), "5,6,0");
         assertEqual(weekDaysToShow(order, 0, true).join(","), "5,6,0");
+      });
+
+      const sharedSpot = { id: "added-1", name: "Café Kopi ☕ upstairs", percentFull: 40, lat: 40.1101, lng: -88.2295 };
+      const sampleShare = {
+        addedSpots: [sharedSpot],
+        editedHours: { grainger: { open: 9, close: 21 } },
+        editedFullness: { union: 70 },
+      };
+
+      test("a share link carries spots and edits, including names with accents and emoji", () => {
+        const hash = encodeShare(sampleShare);
+        assertEqual(hash.startsWith("#share="), true);
+        assertEqual(/^#share=[A-Za-z0-9_-]+$/.test(hash), true); // safe to paste anywhere
+        const back = decodeShare(hash);
+        assertEqual(back.addedSpots[0].name, "Café Kopi ☕ upstairs");
+        assertEqual(JSON.stringify(back.editedHours), '{"grainger":{"open":9,"close":21}}');
+        assertEqual(back.editedFullness.union, 70);
+        assertEqual(describeShare(back), "1 study spot and edits for 2 spots");
+      });
+
+      test("broken, empty or tampered share links are ignored", () => {
+        assertEqual(decodeShare(""), null);
+        assertEqual(decodeShare("#something-else"), null);
+        assertEqual(decodeShare("#share=not-valid-data!!"), null);
+        assertEqual(decodeShare(encodeShare({ addedSpots: [], editedHours: {}, editedFullness: {} })), null);
+        const tampered = encodeShare({
+          addedSpots: [{ ...sharedSpot, name: "" }, { ...sharedSpot, id: "added-2", percentFull: 900 }],
+          editedHours: { grainger: { open: 20, close: 8 } },
+          editedFullness: { union: -5 },
+        });
+        assertEqual(decodeShare(tampered), null);
+      });
+
+      test("importing adds new spots, updates ones you already have, and takes the shared edits", () => {
+        const mine = {
+          addedSpots: [{ ...sharedSpot, percentFull: 90 }, { ...sharedSpot, id: "added-mine", name: "My spot" }],
+          editedHours: { grainger: { open: 8, close: 20 }, cif: { open: 7, close: 23 } },
+          editedFullness: {},
+        };
+        const newSpot = { ...sharedSpot, id: "added-new", name: "New spot" };
+        const { merged, summary } = mergeShared(mine, { ...sampleShare, addedSpots: [sharedSpot, newSpot] });
+        assertEqual(JSON.stringify(summary), '{"added":1,"updated":1,"edited":2}');
+        assertEqual(merged.addedSpots.map((spot) => `${spot.id}:${spot.percentFull}`).join(","), "added-1:40,added-mine:40,added-new:40");
+        assertEqual(merged.editedHours.grainger.open, 9); // the shared hours replace yours for that spot
+        assertEqual(merged.editedHours.cif.open, 7); // your other edits stay
+        assertEqual(merged.editedFullness.union, 70);
       });
 
       const results = document.getElementById("results");

@@ -8,8 +8,8 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
     />
-    <link rel="stylesheet" href="style.css?v=034edd3" />
-    <script src="theme.js?v=034edd3"></script>
+    <link rel="stylesheet" href="style.css?v=790b711" />
+    <script src="theme.js?v=790b711"></script>
   </head>
   <body>
     <header>
@@ -19,6 +19,14 @@
       </div>
       <button id="theme-toggle" type="button" class="secondary theme-toggle"></button>
     </header>
+    <!-- Shown when the page was opened from someone's share link. -->
+    <div id="import-banner" class="import-banner" role="region" aria-label="Shared spots" hidden>
+      <p id="import-text"></p>
+      <div class="form-row">
+        <button id="import-share" type="button">Import</button>
+        <button id="dismiss-share" type="button" class="secondary">Not now</button>
+      </div>
+    </div>
     <main>
       <section class="panel">
         <details class="panel-section" data-section="classes" open>
@@ -80,6 +88,10 @@
         <details class="panel-section" data-section="added-spots" open>
           <summary><h2>Spots you added</h2></summary>
           <ol id="added-spot-list" class="spot-list"></ol>
+          <div class="share-row">
+            <button id="share-spots" type="button" class="secondary">Share my spots</button>
+            <p id="share-message" class="status" role="status"></p>
+          </div>
         </details>
       </section>
 
@@ -203,15 +215,16 @@
       </dialog>
     </main>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <script src="buildings.js?v=034edd3"></script>
-    <script src="walk-timer.js?v=034edd3"></script>
-    <script src="study-spots.js?v=034edd3"></script>
-    <script src="added-spots.js?v=034edd3"></script>
-    <script src="friends.js?v=034edd3"></script>
-    <script src="leaderboard.js?v=034edd3"></script>
-    <script src="custom-blocks.js?v=034edd3"></script>
-    <script src="dining-halls.js?v=034edd3"></script>
-    <script src="week-view.js?v=034edd3"></script>
-    <script src="app.js?v=034edd3"></script>
+    <script src="buildings.js?v=790b711"></script>
+    <script src="walk-timer.js?v=790b711"></script>
+    <script src="study-spots.js?v=790b711"></script>
+    <script src="added-spots.js?v=790b711"></script>
+    <script src="friends.js?v=790b711"></script>
+    <script src="leaderboard.js?v=790b711"></script>
+    <script src="custom-blocks.js?v=790b711"></script>
+    <script src="dining-halls.js?v=790b711"></script>
+    <script src="week-view.js?v=790b711"></script>
+    <script src="share-links.js?v=790b711"></script>
+    <script src="app.js?v=790b711"></script>
   </body>
 </html>
