@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Class Routes</title>
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script src="theme.js"></script>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Class Routes</h1>
+        <p class="subtitle">Your week of classes, and the walks between them</p>
+      </div>
+      <button id="theme-toggle" type="button" class="secondary theme-toggle"></button>
+    </header>
+    <main>
+      <section class="panel">
+        <details class="panel-section" data-section="classes" open>
+          <summary><h2>Your classes</h2></summary>
+          <ol id="class-list" class="class-list"></ol>
+
+          <details id="add-class-details" class="add-class-details">
+            <summary>Add a class or exam</summary>
+            <form id="add-class-form" class="add-class" novalidate>
+              <label>
+                Course name (optional)
+                <input id="new-course" type="text" maxlength="40" placeholder="CS 124" />
+              </label>
+              <label>
+                Building
+                <select id="new-building" required></select>
+              </label>
+              <label>
+                Room (optional)
+                <input id="new-room" type="text" maxlength="12" placeholder="1404" />
+              </label>
+              <fieldset class="day-picker">
+                <legend>Meets on</legend>
+                <div id="new-days" class="day-checkboxes"></div>
+              </fieldset>
+              <div class="form-row">
+                <label>
+                  Starts at
+                  <input id="new-time" type="time" required />
+                </label>
+                <label>
+                  Length (minutes)
+                  <input id="new-length" type="number" min="5" max="600" step="5" value="50" required />
+                </label>
+              </div>
+              <p id="form-error" class="form-error" role="alert"></p>
+              <button type="submit">Add</button>
+            </form>
+          </details>
+        </details>
+
+        <details class="panel-section" data-section="walks" open>
+          <summary><h2>Walks on <span id="selected-day-name"></span></h2></summary>
+          <p id="route-status" class="status" role="status"></p>
+          <ol id="leg-list" class="leg-list"></ol>
+        </details>
+
+        <details class="panel-section" data-section="spots" open>
+          <summary><h2>Study spots</h2></summary>
+          <p id="spot-summary" class="status" role="status"></p>
+          <div class="spot-filters" role="group" aria-label="Filter study spots">
+            <button type="button" class="chip" data-filter="openOnly" aria-pressed="true">Open only</button>
+            <button type="button" class="chip" data-filter="quiet" aria-pressed="false">Quiet</button>
+            <button type="button" class="chip" data-filter="outlets" aria-pressed="false">Outlets</button>
+          </div>
+          <ol id="spot-list" class="spot-list"></ol>
+        </details>
+
+        <details class="panel-section" data-section="added-spots" open>
+          <summary><h2>Spots you added</h2></summary>
+          <ol id="added-spot-list" class="spot-list"></ol>
+        </details>
+      </section>
+
+      <section class="views">
+        <div id="day-tabs" class="day-tabs day-bar" role="tablist" aria-label="Day"></div>
+        <div class="view-tabs" role="tablist" aria-label="View">
+          <button id="map-tab" class="view-tab" role="tab" aria-selected="true">Map</button>
+          <button id="list-tab" class="view-tab phone-only" role="tab" aria-selected="false">List</button>
+          <button id="week-tab" class="view-tab" role="tab" aria-selected="false">Week</button>
+          <button id="groups-tab" class="view-tab" role="tab" aria-selected="false">Groups</button>
+          <button id="leaderboard-tab" class="view-tab" role="tab" aria-selected="false">Leaderboard</button>
+        </div>
+        <div id="spot-bar" class="spot-bar">
+          <label class="spot-toggle">
+            <input id="show-spots" type="checkbox" checked />
+            Study spots at
+          </label>
+          <input id="spot-time" type="time" step="60" aria-label="Time to check study spots" />
+          <button id="spot-now" type="button" class="secondary">Now</button>
+          <label class="spot-toggle">
+            <input id="show-dining" type="checkbox" checked />
+            Dining halls
+          </label>
+          <ul id="spot-legend" class="spot-legend" aria-label="Study spot colors"></ul>
+        </div>
+        <div id="map" class="map" aria-label="Campus map with walking routes and study spots"></div>
+        <!-- Moved into the map's top-right corner by app.js when the page loads. -->
+        <div id="add-spot-control" class="add-spot-control">
+          <button id="add-spot-toggle" type="button" aria-expanded="false" aria-controls="add-spot-form">
+            + Add a study spot
+          </button>
+          <form id="add-spot-form" class="add-spot-form" novalidate hidden>
+            <div class="add-spot-head">
+              <strong>Add a study spot you found</strong>
+              <button id="add-spot-close" type="button" class="close-x" aria-label="Close">×</button>
+            </div>
+            <label>
+              Name
+              <input id="new-spot-name" type="text" maxlength="40" placeholder="DCL second floor" />
+            </label>
+            <p class="status">After you place it, set how full it is from its popup.</p>
+            <p id="spot-form-message" class="status" role="status"></p>
+            <button id="place-spot" type="submit">Place it on the map</button>
+          </form>
+          <div id="placing-banner" class="placing-banner" role="status" hidden>
+            <span id="placing-text"></span>
+            <button id="cancel-placing" type="button" class="secondary">Cancel</button>
+          </div>
+        </div>
+        <details id="block-form-details" class="week-blocks" hidden>
+          <summary id="block-form-title">Add a block (gym, work, study time…)</summary>
+          <form id="block-form" class="add-class block-form" novalidate>
+            <label>
+              Name
+              <input id="block-name" type="text" maxlength="30" placeholder="Gym" />
+            </label>
+            <fieldset class="day-picker">
+              <legend>Repeats on</legend>
+              <div id="block-days" class="day-checkboxes"></div>
+            </fieldset>
+            <div class="form-row">
+              <label>
+                Starts at
+                <input id="block-time" type="time" />
+              </label>
+              <label>
+                Length (minutes)
+                <input id="block-length" type="number" min="5" max="1440" step="5" value="60" />
+              </label>
+            </div>
+            <p id="block-message" class="status" role="status"></p>
+            <div class="form-row">
+              <button id="block-submit" type="submit">Add block</button>
+              <button id="block-remove" type="button" class="secondary danger" hidden>Remove</button>
+              <button id="block-cancel" type="button" class="secondary" hidden>Cancel</button>
+            </div>
+          </form>
+        </details>
+        <div id="week" class="week" hidden></div>
+        <div id="groups-view" class="groups-view" hidden>
+          <h2>Friend groups</h2>
+          <p class="status">Friends are sample data for now. Checked groups show in meetups.</p>
+          <ul id="group-list" class="group-list"></ul>
+          <details id="new-group-details" class="add-class-details">
+            <summary>Make a group</summary>
+            <form id="new-group-form" class="add-class" novalidate>
+              <label>
+                Group name
+                <input id="new-group-name" type="text" maxlength="30" placeholder="CS 124 study group" />
+              </label>
+              <fieldset class="day-picker">
+                <legend>Friends in the group</legend>
+                <div id="new-group-friends" class="day-checkboxes"></div>
+              </fieldset>
+              <p id="group-error" class="form-error" role="alert"></p>
+              <button type="submit">Make group</button>
+            </form>
+          </details>
+
+          <h2>Meetups on <span id="meetup-day-name"></span></h2>
+          <ol id="meetup-list" class="leg-list"></ol>
+        </div>
+        <div id="leaderboard-view" class="groups-view" hidden>
+          <h2>Leaderboard</h2>
+          <p class="status">Walking stats are sample data for now, including yours.</p>
+          <label class="leaderboard-group">
+            Group
+            <select id="leaderboard-group"></select>
+          </label>
+          <div id="ranking-buttons" class="spot-filters" role="group" aria-label="Ranking"></div>
+          <ol id="leaderboard-list" class="leaderboard-list"></ol>
+        </div>
+      </section>
+      <dialog id="class-details" class="class-details" aria-labelledby="class-details-title">
+        <form method="dialog">
+          <h2 id="class-details-title"></h2>
+          <dl id="class-details-body"></dl>
+          <button type="submit">Close</button>
+        </form>
+      </dialog>
+    </main>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="buildings.js"></script>
+    <script src="walk-timer.js"></script>
+    <script src="study-spots.js"></script>
+    <script src="added-spots.js"></script>
+    <script src="friends.js"></script>
+    <script src="leaderboard.js"></script>
+    <script src="custom-blocks.js"></script>
+    <script src="dining-halls.js"></script>
+    <script src="week-view.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

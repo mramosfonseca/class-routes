@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Class Routes tests</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 16px; }
+      .pass { color: #16a34a; }
+      .fail { color: #dc2626; }
+    </style>
+  </head>
+  <body>
+    <h1>Class Routes tests</h1>
+    <p id="summary">Running…</p>
+    <ul id="results"></ul>
+    <script src="walk-timer.js"></script>
+    <script src="study-spots.js"></script>
+    <script src="added-spots.js"></script>
+    <script src="buildings.js"></script>
+    <script src="friends.js"></script>
+    <script src="leaderboard.js"></script>
+    <script src="custom-blocks.js"></script>
+    <script src="dining-halls.js"></script>
+    <script src="week-view.js"></script>
+    <script>
+      const tests = [];
+      function test(name, body) {
+        tests.push({ name, body });
+      }
+      function assertEqual(actual, expected) {
+        if (actual !== expected) {
+          throw new Error(`expected ${JSON.stringify(expected)} but got ${JSON.stringify(actual)}`);
+        }
+      }
+
+      test("a walk that takes exactly the predicted time says so", () => {
+        assertEqual(compareWalk(6, 6 * 60), "Took 6 min, right on the predicted 6 min.");
+      });
+
+      test("a slower walk says how many minutes longer it took", () => {
+        assertEqual(compareWalk(6, 8 * 60), "Took 8 min, 2 min longer than the predicted 6 min.");
+      });
+
+      test("a faster walk says how many minutes faster it was", () => {
+        assertEqual(compareWalk(6, 5 * 60), "Took 5 min, 1 min faster than the predicted 6 min.");
+      });
+
+      test("the actual time rounds to the nearest minute", () => {
+        assertEqual(compareWalk(6, 6 * 60 + 40), "Took 7 min, 1 min longer than the predicted 6 min.");
+      });
+
+      test("the live timer shows minutes and seconds", () => {
+        assertEqual(formatElapsed(125), "2:05");
+        assertEqual(formatElapsed(0), "0:00");
+      });
+
+      const grainger = STUDY_SPOTS.find((spot) => spot.id === "grainger");
+      const WEDNESDAY = 3;
+      const SATURDAY = 6;
+
+      test("a study spot is closed before it opens, with no free seats", () => {
+        assertEqual(spotStatus(grainger, WEDNESDAY, 6).level, "closed");
+        assertEqual(spotStatus(grainger, WEDNESDAY, 6).freeSeats, 0);
+      });
+
+      test("times after midnight count as late night, so a 2 AM spot is open at 1 AM", () => {
+        assertEqual(spotHour(1, 0), 25);
+        assertEqual(spotStatus(grainger, WEDNESDAY, spotHour(1, 0)).level !== "closed", true);
+      });
+
+      test("every open spot has a crowd level and between 0 and its seat count free", () => {
+        for (const spot of STUDY_SPOTS) {
+          for (let hour = spot.open; hour < spot.close; hour += 0.5) {
+            const status = spotStatus(spot, WEDNESDAY, hour);
+            assertEqual(["open", "filling", "packed"].includes(status.level), true);
+            assertEqual(status.freeSeats >= 0 && status.freeSeats <= spot.seats, true);
+          }
+        }
+      });
+
+      test("the same spot and time always gives the same crowd level", () => {
+        assertEqual(spotStatus(grainger, WEDNESDAY, 20).freeSeats, spotStatus(grainger, WEDNESDAY, 20).freeSeats);
+      });
+
+      test("a big library is packed on a weeknight but has room on a Saturday night", () => {
+        assertEqual(spotStatus(grainger, WEDNESDAY, 20).level, "packed");
+        assertEqual(spotStatus(grainger, SATURDAY, 20).level === "packed", false);
+      });
+
+      test("spot hours read as clock times", () => {
+        assertEqual(formatSpotHour(8), "8 AM");
+        assertEqual(formatSpotHour(25.5), "1:30 AM");
+        assertEqual(formatSpotHour(12), "12 PM");
+      });
+
+      const MONDAY = 1;
+      const lecture = (time, lengthMinutes, buildingId = "siebel") => ({
+        course: "TEST", buildingId, days: [MONDAY], time, lengthMinutes,
+      });
+      const describeWindows = (windows) =>
+        windows.map((window) => `${window.start / 60}-${window.end / 60}`).join(", ");
+
+      test("meetups are the times when nobody in the group has class", () => {
+        const you = [lecture("10:00", 60)];
+        const friend = [lecture("13:00", 120)];
+        assertEqual(describeWindows(sharedFreeWindows([you, friend], MONDAY)), "0-10, 11-13, 15-24");
+      });
+
+      test("free gaps shorter than 30 minutes are not meetups", () => {
+        const you = [lecture("00:00", 590)];
+        const friend = [lecture("10:00", 840)];
+        assertEqual(sharedFreeWindows([you, friend], MONDAY).length, 0);
+      });
+
+      test("with no classes that day, the whole 24 hours is free", () => {
+        assertEqual(describeWindows(sharedFreeWindows([[], []], WEDNESDAY)), "0-24");
+      });
+
+      test("someone is at their last class's building, or their first one before class", () => {
+        const schedule = [lecture("10:00", 50, "altgeld"), lecture("14:00", 50, "ece")];
+        assertEqual(whereIs(schedule, MONDAY, 9 * 60).id, "altgeld");
+        assertEqual(whereIs(schedule, MONDAY, 12 * 60).id, "altgeld");
+        assertEqual(whereIs(schedule, MONDAY, 16 * 60).id, "ece");
+        assertEqual(whereIs(schedule, WEDNESDAY, 12 * 60), null);
+      });
+
+      test("the suggested meetup spot is never closed or packed", () => {
+        const schedules = [[lecture("09:00", 50)], [lecture("09:00", 50, "library")]];
+        for (let minute = MEETUP_DAY_START; minute < MEETUP_DAY_END; minute += 30) {
+          const match = meetupSpot(schedules, MONDAY, minute, minute + 30);
+          if (match) assertEqual(["open", "filling"].includes(match.status.level), true);
+        }
+      });
+
+      test("in the middle of the night, no meetup spot is suggested because all are closed", () => {
+        assertEqual(meetupSpot([[lecture("09:00", 50)]], MONDAY, 3 * 60, 5 * 60), null);
+      });
+
+      test("a free window starting at midnight suggests a spot at a time it is open", () => {
+        const match = meetupSpot([[lecture("12:00", 50)]], MONDAY, 2 * 60, 12 * 60);
+        assertEqual(match !== null, true);
+        assertEqual(match.minute >= 2 * 60 && match.minute < 12 * 60, true);
+        assertEqual(isSpotOpen(match.spot, spotHour(Math.floor(match.minute / 60), match.minute % 60)), true);
+      });
+
+      test("on a day with no classes, a meetup spot is still suggested", () => {
+        assertEqual(meetupSpot([[], []], SATURDAY, 0, 24 * 60) !== null, true);
+      });
+
+      test("calendar items share a lane unless they overlap", () => {
+        assertEqual(assignLanes([{ start: 540, end: 600 }, { start: 600, end: 660 }]).laneCount, 1);
+        const overlapping = assignLanes([{ start: 540, end: 620 }, { start: 600, end: 660 }]);
+        assertEqual(overlapping.laneCount, 2);
+        assertEqual(overlapping.lanes.join(","), "0,1");
+      });
+
+      const walker = (name, mph, walks, onTimeWalks) => ({ name, stats: { mph, walks, onTimeWalks } });
+      const order = (ranked) => ranked.map((person) => `${person.place}.${person.name}`).join(" ");
+
+      test("the fastest walker ranks first", () => {
+        const people = [walker("A", 2.9, 10, 9), walker("B", 3.8, 10, 5), walker("C", 3.1, 10, 10)];
+        assertEqual(order(rankPeople(people, "fastest")), "1.B 2.C 3.A");
+      });
+
+      test("on time ranks by the share of walks that were on time, not the count", () => {
+        const people = [walker("A", 3, 20, 15), walker("B", 3, 4, 4), walker("C", 3, 10, 9)];
+        assertEqual(order(rankPeople(people, "onTime")), "1.B 2.C 3.A");
+      });
+
+      test("tied people share a place, the one with more walks is listed first, and the next place skips", () => {
+        const people = [walker("A", 3, 5, 5), walker("B", 3, 12, 12), walker("C", 3, 10, 8)];
+        assertEqual(order(rankPeople(people, "onTime")), "1.B 1.A 3.C");
+      });
+
+      test("every sample friend and you have walking stats", () => {
+        assertEqual(SAMPLE_FRIENDS.every((friend) => SAMPLE_WALK_STATS[friend.id]), true);
+        assertEqual(Boolean(SAMPLE_WALK_STATS.you), true);
+      });
+
+      test("a spot you add needs a name and a percent full from 0 to 100", () => {
+        assertEqual(addedSpotError("", 50), "Give the spot a name.");
+        assertEqual(addedSpotError("   ", 50), "Give the spot a name.");
+        assertEqual(addedSpotError("Siebel 2nd floor", 120), "Set how full it is, from 0 to 100%.");
+        assertEqual(addedSpotError("Siebel 2nd floor", NaN), "Set how full it is, from 0 to 100%.");
+        assertEqual(addedSpotError("Siebel 2nd floor", 0), "");
+        assertEqual(addedSpotError("Siebel 2nd floor", 100), "");
+      });
+
+      test("an added spot's color follows its percent full, with the same cutoffs as built-in spots", () => {
+        const colorAt = (percentFull) => addedSpotCrowdLevel({ percentFull });
+        assertEqual(colorAt(30), "open");
+        assertEqual(colorAt(54), "open");
+        assertEqual(colorAt(55), "filling");
+        assertEqual(colorAt(81), "filling");
+        assertEqual(colorAt(82), "packed");
+        assertEqual(colorAt(100), "packed");
+      });
+
+      test("a built-in spot's percent full matches its color", () => {
+        for (let hour = grainger.open; hour < grainger.close; hour += 0.5) {
+          const status = spotStatus(grainger, WEDNESDAY, hour);
+          assertEqual(crowdLevelFor(status.percentFull / 100), status.level);
+        }
+      });
+
+      test("a percent you set for a built-in spot replaces its sample number while it's open", () => {
+        applySpotFullness({ grainger: 90 });
+        const status = spotStatus(grainger, SATURDAY, 10);
+        assertEqual(`${status.percentFull} ${status.level} ${status.freeSeats}`, "90 packed 90");
+        assertEqual(spotStatus(grainger, SATURDAY, 6).level, "closed");
+        applySpotFullness({});
+        assertEqual(spotStatus(grainger, SATURDAY, 10).percentFull === 90, false);
+      });
+
+      test("saved percents outside 0 to 100 are dropped instead of crashing", () => {
+        assertEqual(JSON.stringify(parseSpotFullness("not json")), "{}");
+        assertEqual(JSON.stringify(parseSpotFullness(null)), "{}");
+        const saved = { grainger: 70, ugl: 140, union: -5, cif: "full" };
+        assertEqual(JSON.stringify(parseSpotFullness(JSON.stringify(saved))), '{"grainger":70}');
+      });
+
+      const arc = STUDY_SPOTS.find((spot) => spot.id === "arc");
+      const crce = STUDY_SPOTS.find((spot) => spot.id === "crce");
+      const SUNDAY = 0;
+      const FRIDAY = 5;
+
+      test("the ARC and CRCE follow Campus Rec's hours for each day of the week", () => {
+        // ARC: Mon-Thu 6am-11pm, Fri 6am-10pm, weekends 9am-10pm.
+        assertEqual(spotStatus(arc, MONDAY, 6).level !== "closed", true);
+        assertEqual(spotStatus(arc, MONDAY, 22.5).level !== "closed", true);
+        assertEqual(spotStatus(arc, FRIDAY, 22.5).level, "closed");
+        assertEqual(spotStatus(arc, SATURDAY, 8).level, "closed");
+        assertEqual(spotStatus(arc, SUNDAY, 9).level !== "closed", true);
+        // CRCE: Mon-Thu 7am-11pm, Fri 7am-9pm, weekends 11am-6pm.
+        assertEqual(spotStatus(crce, WEDNESDAY, 7).level !== "closed", true);
+        assertEqual(spotStatus(crce, FRIDAY, 21).level, "closed");
+        assertEqual(spotStatus(crce, SUNDAY, 10).level, "closed");
+        assertEqual(spotStatus(crce, SUNDAY, 17.5).level !== "closed", true);
+        assertEqual(spotStatus(crce, SATURDAY, 18).level, "closed");
+      });
+
+      test("edited hours replace a weekly schedule on every day, and Reset brings it back", () => {
+        applySpotHours({ crce: { open: 8, close: 20 } });
+        assertEqual(`${spotHoursOn(crce, SUNDAY).open}-${spotHoursOn(crce, SUNDAY).close}`, "8-20");
+        assertEqual(spotStatus(crce, SUNDAY, 9).level !== "closed", true);
+        applySpotHours({});
+        assertEqual(`${spotHoursOn(crce, SUNDAY).open}-${spotHoursOn(crce, SUNDAY).close}`, "11-18");
+        assertEqual(spotStatus(crce, SUNDAY, 9).level, "closed");
+      });
+
+      test("spots you add survive being saved and loaded again", () => {
+        const spots = [{ id: "added-1", name: "DCL lobby", percentFull: 85, lat: 40.1131, lng: -88.2264 }];
+        const loaded = parseAddedSpots(JSON.stringify(spots));
+        assertEqual(loaded.length, 1);
+        assertEqual(`${loaded[0].name} ${loaded[0].percentFull} ${loaded[0].lat} ${loaded[0].lng}`, "DCL lobby 85 40.1131 -88.2264");
+      });
+
+      test("spots saved with only a color before Switch A get a matching percent", () => {
+        const old = [
+          { id: "a", name: "Green one", level: "open", lat: 40.1, lng: -88.2 },
+          { id: "b", name: "Orange one", level: "filling", lat: 40.1, lng: -88.2 },
+          { id: "c", name: "Red one", level: "packed", lat: 40.1, lng: -88.2 },
+        ];
+        const loaded = parseAddedSpots(JSON.stringify(old));
+        assertEqual(loaded.map((spot) => `${spot.percentFull}:${addedSpotCrowdLevel(spot)}`).join(","), "30:open,70:filling,90:packed");
+      });
+
+      test("broken or missing saved spots load as an empty list instead of crashing", () => {
+        assertEqual(parseAddedSpots(null).length, 0);
+        assertEqual(parseAddedSpots("not json").length, 0);
+        const mixed = [
+          { id: "a", name: "Good", percentFull: 40, lat: 40.1, lng: -88.2 },
+          { id: "b", name: "", percentFull: 40, lat: 40.1, lng: -88.2 },
+          { id: "c", name: "Too full", percentFull: 150, lat: 40.1, lng: -88.2 },
+          { id: "d", name: "No place", percentFull: 40 },
+          { id: "e", name: "Unknown color", level: "closed", lat: 40.1, lng: -88.2 },
+          null,
+        ];
+        assertEqual(parseAddedSpots(JSON.stringify(mixed)).map((spot) => spot.id).join(","), "a");
+      });
+
+      test("edited hours are read from two times, and closing before opening means after midnight", () => {
+        assertEqual(JSON.stringify(hoursFromTimes("08:00", "22:30")), '{"open":8,"close":22.5}');
+        assertEqual(JSON.stringify(hoursFromTimes("20:00", "02:00")), '{"open":20,"close":26}');
+        assertEqual(hoursFromTimes("09:00", "09:00").error, "Opening and closing times can't be the same.");
+        assertEqual(hoursFromTimes("", "17:00").error, "Enter both an opening and a closing time.");
+      });
+
+      test("a spot with edited hours is open and closed at the right times, even across midnight", () => {
+        const lateNight = { open: 20, close: 26 };
+        assertEqual(isSpotOpen(lateNight, 21), true);
+        assertEqual(isSpotOpen(lateNight, spotHour(1, 30)), true);
+        assertEqual(isSpotOpen(lateNight, 12), false);
+        const earlyMorning = hoursFromTimes("03:00", "11:00");
+        assertEqual(isSpotOpen(earlyMorning, spotHour(4, 0)), true);
+        assertEqual(isSpotOpen(earlyMorning, 10), true);
+        assertEqual(isSpotOpen(earlyMorning, 12), false);
+      });
+
+      test("edited hours change a spot, and resetting brings its usual hours back", () => {
+        applySpotHours({ grainger: { open: 10, close: 12 } });
+        assertEqual(spotStatus(grainger, WEDNESDAY, 9).level, "closed");
+        applySpotHours({});
+        assertEqual(`${grainger.open}-${grainger.close}`, "8-26");
+        assertEqual(spotStatus(grainger, WEDNESDAY, 9).level === "closed", false);
+      });
+
+      test("broken saved hours are dropped instead of crashing", () => {
+        assertEqual(JSON.stringify(parseSpotHours("not json")), "{}");
+        const saved = { good: { open: 8, close: 20 }, flipped: { open: 20, close: 8 }, missing: {} };
+        assertEqual(Object.keys(parseSpotHours(JSON.stringify(saved))).join(","), "good");
+      });
+
+      test("time boxes show hours past midnight as clock times", () => {
+        assertEqual(timeValueOf(26), "02:00");
+        assertEqual(timeValueOf(8.5), "08:30");
+      });
+
+      const gym = { id: "block-1", name: "Gym", days: [2, 4], time: "17:00", lengthMinutes: 60, color: DEFAULT_BLOCK_COLOR };
+
+      test("new blocks are white, and blocks saved earlier with a color keep it", () => {
+        assertEqual(DEFAULT_BLOCK_COLOR, "#ffffff");
+        const older = { ...gym, id: "block-old", color: BLOCK_COLORS[1].value };
+        const loaded = parseBlocks(JSON.stringify([gym, older]));
+        assertEqual(loaded.map((block) => block.color).join(","), `#ffffff,${BLOCK_COLORS[1].value}`);
+      });
+
+      test("a custom block needs a name, a day, a start time, a sensible length and a color", () => {
+        assertEqual(blockError(gym), "");
+        assertEqual(blockError({ ...gym, name: "  " }), "Give the block a name.");
+        assertEqual(blockError({ ...gym, days: [] }), "Pick at least one day.");
+        assertEqual(blockError({ ...gym, days: [9] }), "Pick at least one day.");
+        assertEqual(blockError({ ...gym, time: "" }), "Enter a start time.");
+        assertEqual(blockError({ ...gym, time: "25:00" }), "Enter a start time.");
+        assertEqual(blockError({ ...gym, lengthMinutes: 0 }), "Length must be between 5 and 1440 minutes.");
+        assertEqual(blockError({ ...gym, color: "red" }), "Pick a color.");
+      });
+
+      test("custom blocks show only on the days they repeat, earliest first", () => {
+        const work = { ...gym, id: "block-2", name: "Work", days: [2], time: "09:00" };
+        assertEqual(blocksOn([gym, work], 2).map((block) => block.name).join(","), "Work,Gym");
+        assertEqual(blocksOn([gym, work], 4).map((block) => block.name).join(","), "Gym");
+        assertEqual(blocksOn([gym, work], 1).length, 0);
+      });
+
+      test("custom blocks survive being saved and loaded, and broken ones are dropped", () => {
+        assertEqual(parseBlocks(null).length, 0);
+        assertEqual(parseBlocks("not json").length, 0);
+        const saved = [gym, { ...gym, id: "block-3", name: "" }, { ...gym, id: 4 }, null];
+        const loaded = parseBlocks(JSON.stringify(saved));
+        assertEqual(loaded.map((block) => `${block.id}:${block.name}:${block.days}:${block.time}`).join(","), "block-1:Gym:2,4:17:00");
+      });
+
+      test("a dining hall shows 'hours not set' until it has hours, then open or closed", () => {
+        assertEqual(diningHallStatus(undefined, 12), "unset");
+        const hours = hoursFromTimes("07:00", "20:00");
+        assertEqual(diningHallStatus(hours, 7), "open");
+        assertEqual(diningHallStatus(hours, 19.5), "open");
+        assertEqual(diningHallStatus(hours, 20), "closed");
+        assertEqual(diningHallStatus(hours, spotHour(1, 0)), "closed");
+      });
+
+      test("a day tab stands for that weekday in the Monday-to-Sunday week containing today", () => {
+        const mondayNov23 = new Date(2026, 10, 23);
+        assertEqual(dateInWeekOf(mondayNov23, MONDAY), "2026-11-23");
+        assertEqual(dateInWeekOf(mondayNov23, SUNDAY), "2026-11-29");
+        const sundayNov29 = new Date(2026, 10, 29);
+        assertEqual(dateInWeekOf(sundayNov29, MONDAY), "2026-11-23");
+        const wednesdayDec2 = new Date(2026, 11, 2);
+        assertEqual(dateInWeekOf(wednesdayDec2, FRIDAY), "2026-12-04");
+      });
+
+      test("dining halls are closed during the break even with hours set, and reopen after it", () => {
+        const ikenberry = DINING_HALLS[0];
+        const hours = hoursFromTimes("07:00", "20:00");
+        assertEqual(diningHallStatus(hours, 12, closureOn(ikenberry, "2026-11-23")), "break");
+        assertEqual(diningHallStatus(undefined, 12, closureOn(ikenberry, "2026-12-06")), "break");
+        assertEqual(closureOn(ikenberry, "2026-12-07"), null);
+        assertEqual(diningHallStatus(hours, 12, closureOn(ikenberry, "2026-12-07")), "open");
+        assertEqual(formatShortDate("2026-12-06"), "Sun, Dec 6");
+      });
+
+      test("all four dining halls are listed with a name, address, place and meals", () => {
+        assertEqual(DINING_HALLS.length, 4);
+        for (const hall of DINING_HALLS) {
+          assertEqual(Boolean(hall.name && hall.address && hall.meals), true);
+          assertEqual(Number.isFinite(hall.lat) && Number.isFinite(hall.lng), true);
+        }
+      });
+
+      test("on phones the Week view shows three days starting at the picked day", () => {
+        const order = [1, 2, 3, 4, 5, 6, 0];
+        assertEqual(weekDaysToShow(order, 3, false).join(","), "1,2,3,4,5,6,0");
+        assertEqual(weekDaysToShow(order, 1, true).join(","), "1,2,3");
+        assertEqual(weekDaysToShow(order, 4, true).join(","), "4,5,6");
+        // Near the end of the week it shifts back so three days still show.
+        assertEqual(weekDaysToShow(order, 6, true).join(","), "5,6,0");
+        assertEqual(weekDaysToShow(order, 0, true).join(","), "5,6,0");
+      });
+
+      const results = document.getElementById("results");
+      let failures = 0;
+      for (const { name, body } of tests) {
+        const item = document.createElement("li");
+        try {
+          body();
+          item.className = "pass";
+          item.textContent = `PASS ${name}`;
+        } catch (error) {
+          failures++;
+          item.className = "fail";
+          item.textContent = `FAIL ${name}: ${error.message}`;
+        }
+        results.appendChild(item);
+      }
+      document.getElementById("summary").textContent =
+        failures === 0 ? `All ${tests.length} tests passed.` : `${failures} of ${tests.length} tests failed.`;
+    </script>
+  </body>
+</html>
