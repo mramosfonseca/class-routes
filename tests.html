@@ -13,16 +13,18 @@
     <h1>Class Routes tests</h1>
     <p id="summary">Running…</p>
     <ul id="results"></ul>
-    <script src="walk-timer.js?v=a01673f"></script>
-    <script src="study-spots.js?v=a01673f"></script>
-    <script src="added-spots.js?v=a01673f"></script>
-    <script src="buildings.js?v=a01673f"></script>
-    <script src="friends.js?v=a01673f"></script>
-    <script src="leaderboard.js?v=a01673f"></script>
-    <script src="custom-blocks.js?v=a01673f"></script>
-    <script src="dining-halls.js?v=a01673f"></script>
-    <script src="week-view.js?v=a01673f"></script>
-    <script src="share-links.js?v=a01673f"></script>
+    <script src="walk-timer.js?v=d232219"></script>
+    <script src="study-spots.js?v=d232219"></script>
+    <script src="added-spots.js?v=d232219"></script>
+    <script src="buildings.js?v=d232219"></script>
+    <script src="friends.js?v=d232219"></script>
+    <script src="leaderboard.js?v=d232219"></script>
+    <script src="custom-blocks.js?v=d232219"></script>
+    <script src="dining-halls.js?v=d232219"></script>
+    <script src="week-view.js?v=d232219"></script>
+    <script src="share-links.js?v=d232219"></script>
+    <script src="mtd-routes.js?v=d232219"></script>
+    <script src="bus-routes.js?v=d232219"></script>
     <script>
       const tests = [];
       function test(name, body) {
@@ -572,6 +574,45 @@
         assertEqual(decodeSchedule(tampered, knownBuilding, sent), null);
         const noName = encodeSchedule({ ...mySchedule, name: "   " }, sent);
         assertEqual(decodeSchedule(noName, knownBuilding, sent).name, "A friend");
+      });
+
+      test("route lines unpack from the compact format", () => {
+        // Google's documented example for the encoded polyline format.
+        const points = decodePolyline("_p~iF~ps|U_ulLnnqC_mqNvxq`@");
+        assertEqual(JSON.stringify(points), "[[38.5,-120.2],[40.7,-120.95],[43.252,-126.453]]");
+        assertEqual(decodePolyline("").length, 0);
+      });
+
+      test("MTD's routes are all there, in their colors, and their lines run through Champaign-Urbana", () => {
+        assertEqual(MTD_ROUTES.length > 30, true);
+        const illini = MTD_ROUTES.find((route) => route.id === "22-illini");
+        assertEqual(`${illini.number} ${illini.name} ${illini.color}`, "22 Illini #5a1d5a");
+        for (const route of MTD_ROUTES) {
+          assertEqual(/^#[0-9a-f]{6}$/.test(route.color), true);
+          assertEqual(route.lines.length > 0, true);
+          for (const [lat, lng] of decodePolyline(route.lines[0])) {
+            assertEqual(lat > 39.9 && lat < 40.3 && lng > -88.45 && lng < -88.05, true);
+          }
+          assertEqual(route.stops.every((stopId) => MTD_STOPS[stopId]), true);
+        }
+      });
+
+      test("a stop lists the routes that serve it", () => {
+        const routes = [
+          { id: "a", stops: ["S1", "S2"] },
+          { id: "b", stops: ["S2"] },
+        ];
+        const index = routesByStop(routes);
+        assertEqual(index.S1.map((route) => route.id).join(","), "a");
+        assertEqual(index.S2.map((route) => route.id).join(","), "a,b");
+      });
+
+      test("route picks start with the campus routes and drop routes that no longer exist", () => {
+        const routes = [{ id: "12-teal" }, { id: "13-silver" }, { id: "22-illini" }, { id: "5-green" }];
+        assertEqual(parseBusRoutePicks(null, routes).join(","), "12-teal,13-silver,22-illini");
+        assertEqual(parseBusRoutePicks('["5-green","99-gone"]', routes).join(","), "5-green");
+        assertEqual(parseBusRoutePicks("[]", routes).length, 0); // you turned them all off
+        assertEqual(formatFeedDate("20261219"), "Dec 19, 2026");
       });
 
       const results = document.getElementById("results");

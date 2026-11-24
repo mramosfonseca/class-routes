@@ -5,6 +5,7 @@ const SPOT_HOURS_STORAGE_KEY = "class-routes.spot-hours";
 const SPOT_FULLNESS_STORAGE_KEY = "class-routes.spot-fullness";
 const FOLDED_SECTIONS_STORAGE_KEY = "class-routes.folded-sections";
 const WALKS_STORAGE_KEY = "class-routes.walks";
+const BUS_PICKS_STORAGE_KEY = "class-routes.bus-routes";
 const BLOCKS_STORAGE_KEY = "class-routes.blocks";
 const WALKING_SPEED_METERS_PER_SECOND = 1.35;
 const MINUTES_FROM_ENTRANCE_TO_ROOM = 2;
@@ -34,6 +35,11 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
+// Bus routes go first so walking routes and study spots are drawn on top of them.
+// Stops use the faster canvas drawing, since there can be hundreds.
+const busLayer = L.layerGroup().addTo(map);
+const busStopLayer = L.layerGroup().addTo(map);
+const busStopRenderer = L.canvas({ padding: 0.5 });
 const routeLayer = L.layerGroup().addTo(map);
 const spotLayer = L.layerGroup().addTo(map);
 const diningLayer = L.layerGroup().addTo(map);
@@ -54,6 +60,10 @@ applySpotFullness(editedFullness);
 let blocks = loadSaved(BLOCKS_STORAGE_KEY, parseBlocks);
 // Walks you timed with Start walk, oldest first.
 let walks = loadSaved(WALKS_STORAGE_KEY, parseWalks);
+// The MTD routes you picked to show on the map (ids from mtd-routes.js).
+let busPicks = loadSaved(BUS_PICKS_STORAGE_KEY, (json) => parseBusRoutePicks(json, MTD_ROUTES));
+const BUS_ROUTES_BY_STOP = routesByStop(MTD_ROUTES);
+const BUS_ATTRIBUTION = "Bus data provided by CUMTD";
 let editingBlockId = null;
 // The name and color of a spot waiting for a map click to place it.
 let pendingSpot = null;
@@ -1591,6 +1601,113 @@ function setUpBlockForm() {
   });
 }
 
+// ---- MTD bus routes (see bus-routes.js and mtd-routes.js) ----
+
+// Each route's lines, unpacked the first time they're drawn.
+const busLineCache = new Map();
+function busRouteLines(route) {
+  if (!busLineCache.has(route.id)) busLineCache.set(route.id, route.lines.map(decodePolyline));
+  return busLineCache.get(route.id);
+}
+
+function busRouteLabel(route) {
+  return `${route.number} ${route.name}`;
+}
+
+function busLayerShown() {
+  return document.getElementById("show-bus").checked;
+}
+
+// Draws the picked routes' lines, each in its MTD color over a thin outline so
+// light colors (Silver) and dark ones (Raven) both stand out on the map.
+// Whether the "Bus data provided by CUMTD" credit is on the map. Leaflet counts
+// every time a credit is added, so it's only added or removed when this changes.
+let busCreditShown = false;
+
+function renderBusRoutes() {
+  busLayer.clearLayers();
+  const shown = busLayerShown() && busPicks.length > 0;
+  if (shown !== busCreditShown) {
+    if (shown) map.attributionControl.addAttribution(BUS_ATTRIBUTION);
+    else map.attributionControl.removeAttribution(BUS_ATTRIBUTION);
+    busCreditShown = shown;
+  }
+  if (shown) {
+    for (const route of MTD_ROUTES.filter((other) => busPicks.includes(other.id))) {
+      for (const line of busRouteLines(route)) {
+        L.polyline(line, { color: "#ffffff", weight: 7, opacity: 0.6, interactive: false }).addTo(busLayer);
+        L.polyline(line, { color: route.color, weight: 4, opacity: 0.9 })
+          .bindTooltip(escapeHtml(busRouteLabel(route)), { sticky: true })
+          .addTo(busLayer);
+      }
+    }
+  }
+  renderBusStops();
+}
+
+// The picked routes' stops, only when zoomed in close enough to tell them apart.
+function renderBusStops() {
+  busStopLayer.clearLayers();
+  if (!busLayerShown() || busPicks.length === 0 || map.getZoom() < BUS_STOPS_MIN_ZOOM) return;
+  const stopIds = new Set(MTD_ROUTES.filter((route) => busPicks.includes(route.id)).flatMap((route) => route.stops));
+  for (const stopId of stopIds) {
+    const [name, lat, lng] = MTD_STOPS[stopId];
+    const routes = BUS_ROUTES_BY_STOP[stopId]
+      .map((route) => `<span class="bus-chip" style="background:${route.color};color:${route.textColor}">${escapeHtml(busRouteLabel(route))}</span>`)
+      .join(" ");
+    L.circleMarker([lat, lng], { renderer: busStopRenderer, radius: 5, color: "#1e293b", weight: 2, fillColor: "#ffffff", fillOpacity: 1 })
+      .bindPopup(`<strong>${escapeHtml(name)}</strong><br><small>Bus stop · routes:</small><div class="bus-chips">${routes}</div>`)
+      .addTo(busStopLayer);
+  }
+}
+
+function saveBusPicks() {
+  saveToStorage(BUS_PICKS_STORAGE_KEY, busPicks);
+}
+
+// The list of routes with a checkbox each, in the side panel.
+function renderBusRoutePicker() {
+  const list = document.getElementById("bus-route-list");
+  list.innerHTML = "";
+  for (const route of MTD_ROUTES) {
+    const item = document.createElement("li");
+    item.innerHTML =
+      `<label><input type="checkbox" value="${route.id}"${busPicks.includes(route.id) ? " checked" : ""} />` +
+      `<span class="bus-chip" style="background:${route.color};color:${route.textColor}">${escapeHtml(route.number)}</span>` +
+      `${escapeHtml(route.name)}</label>`;
+    list.appendChild(item);
+  }
+  const zoomHint = `Stops appear when you zoom in.`;
+  document.getElementById("bus-note").textContent =
+    `${busPicks.length} of ${MTD_ROUTES.length} routes shown. ${zoomHint} Data provided by CUMTD, ` +
+    `for MTD's schedule through ${formatFeedDate(MTD_FEED.validTo)}.`;
+}
+
+function setBusPicks(ids) {
+  busPicks = ids;
+  saveBusPicks();
+  renderBusRoutePicker();
+  renderBusRoutes();
+}
+
+function setUpBusRoutes() {
+  document.getElementById("bus-route-list").addEventListener("change", (event) => {
+    const box = event.target;
+    if (!box.matches('input[type="checkbox"]')) return;
+    // Keep the picks in MTD's route order.
+    const picked = new Set(box.checked ? [...busPicks, box.value] : busPicks.filter((id) => id !== box.value));
+    setBusPicks(MTD_ROUTES.map((route) => route.id).filter((id) => picked.has(id)));
+  });
+  document.getElementById("bus-campus").addEventListener("click", () =>
+    setBusPicks(DEFAULT_BUS_ROUTE_IDS.filter((id) => MTD_ROUTES.some((route) => route.id === id))),
+  );
+  document.getElementById("bus-none").addEventListener("click", () => setBusPicks([]));
+  document.getElementById("show-bus").addEventListener("change", renderBusRoutes);
+  map.on("zoomend", renderBusStops);
+  renderBusRoutePicker();
+  renderBusRoutes();
+}
+
 // ---- Share links (see share-links.js) ----
 
 function showShareMessage(text, isError = false) {
@@ -1828,6 +1945,7 @@ setUpThemeToggle();
 setUpPanelSections();
 setUpBlockForm();
 document.getElementById("share-spots").addEventListener("click", shareMySpots);
+setUpBusRoutes();
 document.getElementById("schedule-share-form").addEventListener("submit", (event) => {
   event.preventDefault();
   shareMySchedule(document.getElementById("schedule-share-name").value);

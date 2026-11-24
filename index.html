@@ -8,8 +8,8 @@
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"
     />
-    <link rel="stylesheet" href="style.css?v=a01673f" />
-    <script src="theme.js?v=a01673f"></script>
+    <link rel="stylesheet" href="style.css?v=d232219" />
+    <script src="theme.js?v=d232219"></script>
   </head>
   <body>
     <header>
@@ -85,6 +85,16 @@
           <ol id="spot-list" class="spot-list"></ol>
         </details>
 
+        <details class="panel-section" data-section="bus" open>
+          <summary><h2>Bus routes</h2></summary>
+          <p id="bus-note" class="status"></p>
+          <div class="spot-filters" role="group" aria-label="Quick picks">
+            <button id="bus-campus" type="button" class="chip">Campus routes</button>
+            <button id="bus-none" type="button" class="chip">None</button>
+          </div>
+          <ul id="bus-route-list" class="bus-route-list" aria-label="Routes to show on the map"></ul>
+        </details>
+
         <details class="panel-section" data-section="added-spots" open>
           <summary><h2>Spots you added</h2></summary>
           <ol id="added-spot-list" class="spot-list"></ol>
@@ -114,6 +124,10 @@
           <label class="spot-toggle">
             <input id="show-dining" type="checkbox" checked />
             Dining halls
+          </label>
+          <label class="spot-toggle">
+            <input id="show-bus" type="checkbox" checked />
+            Bus routes
           </label>
           <ul id="spot-legend" class="spot-legend" aria-label="Study spot colors"></ul>
         </div>
@@ -238,16 +252,18 @@
       </dialog>
     </main>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-    <script src="buildings.js?v=a01673f"></script>
-    <script src="walk-timer.js?v=a01673f"></script>
-    <script src="study-spots.js?v=a01673f"></script>
-    <script src="added-spots.js?v=a01673f"></script>
-    <script src="friends.js?v=a01673f"></script>
-    <script src="leaderboard.js?v=a01673f"></script>
-    <script src="custom-blocks.js?v=a01673f"></script>
-    <script src="dining-halls.js?v=a01673f"></script>
-    <script src="week-view.js?v=a01673f"></script>
-    <script src="share-links.js?v=a01673f"></script>
-    <script src="app.js?v=a01673f"></script>
+    <script src="buildings.js?v=d232219"></script>
+    <script src="walk-timer.js?v=d232219"></script>
+    <script src="study-spots.js?v=d232219"></script>
+    <script src="added-spots.js?v=d232219"></script>
+    <script src="friends.js?v=d232219"></script>
+    <script src="leaderboard.js?v=d232219"></script>
+    <script src="custom-blocks.js?v=d232219"></script>
+    <script src="dining-halls.js?v=d232219"></script>
+    <script src="week-view.js?v=d232219"></script>
+    <script src="share-links.js?v=d232219"></script>
+    <script src="mtd-routes.js?v=d232219"></script>
+    <script src="bus-routes.js?v=d232219"></script>
+    <script src="app.js?v=d232219"></script>
   </body>
 </html>
